@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #12222a;
+  background: #f3f8f6;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 8% 4%, rgba(47, 185, 142, 0.2), transparent 34%),
+    radial-gradient(circle at 96% 12%, rgba(211, 82, 54, 0.14), transparent 30%),
+    linear-gradient(135deg, #f7fbf9 0%, #edf6f2 50%, #f7f4ec 100%);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.glass {
+  border: 1px solid rgba(255, 255, 255, 0.64);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(22px);
+}
+
+.dark-glass {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(16, 24, 32, 0.72);
+  backdrop-filter: blur(20px);
+}
+
+.river-line {
+  position: relative;
+  overflow: hidden;
+}
+
+.river-line::after {
+  content: '';
+  position: absolute;
+  inset: auto -10% 10% -10%;
+  height: 130px;
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.7) 12%, transparent 24%),
+    linear-gradient(115deg, rgba(14, 107, 114, 0.18), rgba(47, 185, 142, 0.08), rgba(211, 82, 54, 0.12));
+  transform: rotate(-3deg);
+  filter: blur(1px);
+  pointer-events: none;
+}
+
+.map-ridge {
+  background-size: 36px 36px;
+}
+
+.section-pad {
+  @apply px-4 sm:px-6 lg:px-8;
+}
+
+.focus-ring {
+  @apply focus:outline-none focus:ring-4 focus:ring-jade/20 focus:border-jade;
+}
