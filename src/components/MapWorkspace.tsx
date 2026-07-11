@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react';
-import { CircleDollarSign, Bus, CalendarDays, Camera, CheckCircle2, ChevronRight, Clock3, Copy, ExternalLink, MapPin, Navigation, PencilLine, RefreshCw, Sparkles, TrainFront, Utensils } from 'lucide-react';
+import { CircleDollarSign, AlertTriangle, Bus, CalendarDays, Camera, CheckCircle2, ChevronRight, Clock3, CloudSun, Copy, ExternalLink, MapPin, Navigation, PencilLine, RefreshCw, Sparkles, TrainFront, Umbrella, Utensils, Wind } from 'lucide-react';
 import type { TravelPlan } from '../utils/aiGenerator';
 import type { RoutePoint, SmartRoute } from '../types/route';
 import { RouteMap } from './RouteMap';
 
-type Tab = 'overview' | 'stops' | 'days' | 'records' | 'transport' | 'food' | 'budget';
+type Tab = 'overview' | 'stops' | 'days' | 'records' | 'weather' | 'transport' | 'food' | 'budget';
 
 const tabs: Array<{ id: Tab; label: string; short: string; icon: typeof MapPin }> = [
   { id: 'overview', label: '概览', short: 'AI', icon: Sparkles },
   { id: 'stops', label: '路线', short: '线', icon: MapPin },
   { id: 'days', label: '日程', short: '日', icon: Clock3 },
   { id: 'records', label: '记录', short: '记', icon: CalendarDays },
+  { id: 'weather', label: '天气', short: '天', icon: CloudSun },
   { id: 'transport', label: '交通', short: '车', icon: Bus },
   { id: 'food', label: '美食', short: '食', icon: Utensils },
   { id: 'budget', label: '预算', short: '¥', icon: CircleDollarSign },
@@ -77,6 +78,7 @@ export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, n
             {tab === 'stops' && <StopsPanel route={route} selectedPointId={selectedPointId} imageUrl={imageUrl} onSelectPoint={onSelectPoint} />}
             {tab === 'days' && <DaysPanel plan={plan} />}
             {tab === 'records' && <DailyRecordPanel route={route} plan={plan} onSelectPoint={onSelectPoint} />}
+            {tab === 'weather' && <WeatherWarningPanel route={route} />}
             {tab === 'transport' && <TransportPanel city={route.city} items={plan.transport} />}
             {tab === 'food' && <FoodPanel route={route} plan={plan} />}
             {tab === 'budget' && <BudgetPanel plan={plan} />}
@@ -254,6 +256,137 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
       <input type="date" value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 w-full bg-transparent text-sm font-black text-white outline-none [color-scheme:dark]" />
     </label>
   );
+}
+
+type WeatherState = {
+  status: 'loading' | 'ready' | 'fallback';
+  temperature: number;
+  windSpeed: number;
+  rainProbability: number;
+  weatherCode: number;
+  updatedAt: string;
+  alerts: string[];
+};
+
+function WeatherWarningPanel({ route }: { route: SmartRoute }) {
+  const [weather, setWeather] = useState<WeatherState>(() => makeFallbackWeather(route.city, 'loading'));
+
+  const refreshWeather = async () => {
+    setWeather((prev) => ({ ...prev, status: 'loading' }));
+    try {
+      const point = route.startPoint ?? route.points[0];
+      const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${point.lat}&longitude=${point.lng}&current=temperature_2m,weather_code,wind_speed_10m&hourly=precipitation_probability,wind_speed_10m,weather_code&forecast_days=1&timezone=auto`);
+      if (!response.ok) throw new Error('weather request failed');
+      const data = await response.json();
+      const rainProbability = Math.max(...(data.hourly?.precipitation_probability?.slice(0, 8) ?? [0]));
+      const maxWind = Math.max(...(data.hourly?.wind_speed_10m?.slice(0, 8) ?? [data.current?.wind_speed_10m ?? 0]));
+      const temperature = Math.round(data.current?.temperature_2m ?? 24);
+      const windSpeed = Math.round(maxWind);
+      const weatherCode = Number(data.current?.weather_code ?? 0);
+      setWeather({
+        status: 'ready',
+        temperature,
+        windSpeed,
+        rainProbability,
+        weatherCode,
+        updatedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+        alerts: buildWeatherAlerts({ rainProbability, windSpeed, temperature, weatherCode }, route.city),
+      });
+    } catch {
+      setWeather(makeFallbackWeather(route.city, 'fallback'));
+    }
+  };
+
+  useEffect(() => {
+    refreshWeather();
+    const timer = window.setInterval(refreshWeather, 10 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [route.id]);
+
+  const level = weather.alerts.length > 1 ? '注意' : weather.rainProbability >= 50 || weather.windSpeed >= 30 ? '关注' : '适宜';
+
+  return (
+    <div>
+      <SideTitle eyebrow="LIVE WEATHER" title="天气预警" desc="根据路线起点实时更新，自动给出拍照、出行和安全建议。" />
+      <div className="rounded-2xl bg-ink p-4 text-white">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-xs font-black tracking-[0.18em] text-jade">{route.city} · {weather.status === 'loading' ? '更新中' : `更新 ${weather.updatedAt}`}</div>
+            <div className="mt-2 font-display text-5xl font-black">{weather.temperature}°C</div>
+            <div className="mt-1 text-sm font-bold text-white/60">{weatherText(weather.weatherCode)} · 风速 {weather.windSpeed} km/h</div>
+          </div>
+          <span className={`rounded-full px-3 py-2 text-xs font-black ${level === '适宜' ? 'bg-jade text-ink' : 'bg-tower text-white'}`}>{level}</span>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <WeatherMetric icon={Umbrella} label="降雨概率" value={`${weather.rainProbability}%`} />
+          <WeatherMetric icon={Wind} label="最大风速" value={`${weather.windSpeed} km/h`} />
+        </div>
+      </div>
+      <div className="mt-4 space-y-3">
+        {weather.alerts.map((alert) => (
+          <div key={alert} className="rounded-2xl border border-ink/8 bg-white p-4">
+            <div className="flex items-start gap-3">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-tower/10 text-tower"><AlertTriangle className="h-4 w-4" /></span>
+              <p className="text-sm font-semibold leading-6 text-ink/68">{alert}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <button onClick={refreshWeather} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-river px-4 py-3 text-sm font-black text-white transition hover:bg-ink active:scale-95">
+        <RefreshCw className="h-4 w-4" />
+        立即刷新天气
+      </button>
+    </div>
+  );
+}
+
+function WeatherMetric({ icon: Icon, label, value }: { icon: typeof CloudSun; label: string; value: string }) {
+  return <div className="rounded-xl bg-white/10 p-3"><Icon className="h-4 w-4 text-jade" /><div className="mt-2 text-xs text-white/45">{label}</div><div className="font-display text-xl font-black">{value}</div></div>;
+}
+
+function makeFallbackWeather(city: string, status: WeatherState['status']): WeatherState {
+  const presets: Record<string, { temperature: number; windSpeed: number; rainProbability: number; weatherCode: number }> = {
+    宜昌: { temperature: 29, windSpeed: 14, rainProbability: 35, weatherCode: 2 },
+    武汉: { temperature: 31, windSpeed: 12, rainProbability: 28, weatherCode: 1 },
+    恩施: { temperature: 24, windSpeed: 10, rainProbability: 48, weatherCode: 3 },
+    荆州: { temperature: 30, windSpeed: 16, rainProbability: 32, weatherCode: 2 },
+    襄阳: { temperature: 29, windSpeed: 18, rainProbability: 25, weatherCode: 1 },
+    黄石: { temperature: 30, windSpeed: 13, rainProbability: 30, weatherCode: 2 },
+  };
+  const preset = presets[city] ?? presets.宜昌;
+  return {
+    status,
+    ...preset,
+    updatedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+    alerts: buildWeatherAlerts(preset, city),
+  };
+}
+
+function buildWeatherAlerts(weather: { rainProbability: number; windSpeed: number; temperature: number; weatherCode: number }, city: string) {
+  const alerts = [];
+  if (weather.rainProbability >= 60 || [61, 63, 65, 80, 81, 82, 95].includes(weather.weatherCode)) {
+    alerts.push(`${city}未来数小时有明显降雨风险，建议把峡谷、江滩、古城墙等户外点位前移，带伞并避开湿滑台阶。`);
+  } else if (weather.rainProbability >= 35) {
+    alerts.push(`${city}有阵雨可能，拍照点建议优先安排在上午或雨停后，保留室内博物馆/咖啡店备选。`);
+  } else {
+    alerts.push(`${city}当前天气总体适宜出行，户外路线可正常推进，傍晚适合拍江景和城市灯光。`);
+  }
+  if (weather.windSpeed >= 30) {
+    alerts.push('风速偏高，江边、山顶和观景平台拍摄时注意固定手机和三脚架，避免临水边缘停留过久。');
+  }
+  if (weather.temperature >= 33) {
+    alerts.push('体感温度偏高，建议避开 12:00-15:00 暴晒时段，把美食、交通换乘和室内讲解放到中午。');
+  }
+  return alerts;
+}
+
+function weatherText(code: number) {
+  if ([0].includes(code)) return '晴';
+  if ([1, 2].includes(code)) return '多云';
+  if ([3, 45, 48].includes(code)) return '阴/雾';
+  if ([51, 53, 55, 61, 63, 65, 80, 81, 82].includes(code)) return '降雨';
+  if ([95, 96, 99].includes(code)) return '雷雨';
+  return '实时天气';
 }
 
 function FoodPanel({ route, plan }: { route: SmartRoute; plan: TravelPlan }) {

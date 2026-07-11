@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, LocateFixed, Loader2, Sparkles } from 'lucide-react';
+import { ArrowLeft, Check, LocateFixed, Loader2, Sparkles } from 'lucide-react';
 import { budgetOptions, cities, dayOptions, examples, groupOptions, interestOptions, type CityName } from '../data/mockData';
 import { generateTravelPlan, type PlannerInput, type TravelPlan } from '../utils/aiGenerator';
 import { MapWorkspace } from './MapWorkspace';
@@ -42,6 +42,7 @@ export function PlannerPage({ initialCity, initialPrompt = '' }: PlannerPageProp
     prompt: '我想去宜昌两天一夜，预算 600，喜欢拍照和美食。',
   }, makeMockLocation(initialCity)));
   const [selectedPointId, setSelectedPointId] = useState<string>();
+  const [resultMode, setResultMode] = useState(false);
   const [navigating, setNavigating] = useState(false);
   const [activePointIndex, setActivePointIndex] = useState(0);
   const [toast, setToast] = useState('已载入宜昌示例方案');
@@ -75,9 +76,10 @@ export function PlannerPage({ initialCity, initialPrompt = '' }: PlannerPageProp
       setSelectedPointId(nextRoute.points[0]?.id);
       setActivePointIndex(0);
       setNavigating(false);
+      setResultMode(true);
       setLoading(false);
       setToast(`已生成 ${form.city}${form.days}天路线地图与沿途观察`);
-      window.setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+      window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 80);
     }, 650);
   };
 
@@ -99,11 +101,13 @@ export function PlannerPage({ initialCity, initialPrompt = '' }: PlannerPageProp
     setSelectedPointId(nextRoute.points[0]?.id);
     setActivePointIndex(0);
     setNavigating(false);
+    setResultMode(false);
     setToast(`已切换到示例：${example.label}`);
   };
 
   const updateCity = (city: CityName) => {
     setForm((prev) => ({ ...prev, city }));
+    setResultMode(false);
     if (location.status !== 'success') {
       setLocation(makeMockLocation(city));
     }
@@ -192,8 +196,8 @@ export function PlannerPage({ initialCity, initialPrompt = '' }: PlannerPageProp
           <div className="rounded-full bg-ink px-5 py-3 text-sm font-bold text-white shadow-soft">{toast}</div>
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
-          <section className="glass rounded-[1.75rem] p-5 shadow-soft">
+        <div className={resultMode ? 'space-y-5' : 'mx-auto max-w-5xl'}>
+          {!resultMode && <section className="glass rounded-[1.75rem] p-5 shadow-soft">
             <div className="mb-5 flex items-center gap-3">
               <BrandMark compact />
               <div>
@@ -358,33 +362,22 @@ export function PlannerPage({ initialCity, initialPrompt = '' }: PlannerPageProp
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
               生成 AI 旅行方案
             </button>
-          </section>
+          </section>}
 
-          <section ref={resultRef} className="space-y-5 scroll-mt-28">
-            <div className="relative min-h-[260px] overflow-hidden rounded-[1.75rem] bg-ink shadow-soft">
-              <img src={selectedCity.imageUrl} alt={`${selectedCity.name}风景`} className="absolute inset-0 h-full w-full object-cover opacity-85" />
-              <div className="absolute inset-0 bg-gradient-to-t from-ink/90 via-ink/30 to-transparent" />
-              <div className="absolute bottom-0 left-0 right-0 p-6 text-white">
-                <div className="mb-3 inline-flex rounded-full bg-white/16 px-3 py-1 text-sm font-black backdrop-blur">{selectedCity.image}</div>
-                <h2 className="font-display text-4xl font-black">{selectedCity.name}</h2>
-                <p className="mt-2 text-white/72">{selectedCity.title}</p>
+          {resultMode && <section ref={resultRef} className="space-y-4 scroll-mt-28">
+            <div className="flex flex-col justify-between gap-3 rounded-[1.5rem] bg-white/80 p-4 shadow-sm ring-1 ring-ink/5 md:flex-row md:items-center">
+              <div>
+                <div className="text-xs font-black uppercase tracking-[0.18em] text-river">AI ROUTE WORKSPACE</div>
+                <h2 className="mt-1 font-display text-2xl font-black text-ink">{plan.title}</h2>
               </div>
+              <button
+                onClick={() => setResultMode(false)}
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-black text-white transition hover:bg-river active:scale-95"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                返回修改需求
+              </button>
             </div>
-
-            <div className="dark-glass rounded-[1.75rem] p-6 text-white shadow-soft">
-              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <p className="text-sm font-black uppercase tracking-[0.2em] text-jade">Generated Itinerary</p>
-                  <h2 className="mt-2 font-display text-3xl font-black">{plan.title}</h2>
-                  <p className="mt-3 leading-7 text-white/70">{plan.summary}</p>
-                </div>
-                <div className="rounded-2xl bg-white/10 px-4 py-3 text-center">
-                  <div className="text-3xl font-black text-jade">{form.budget}</div>
-                  <div className="text-xs font-bold text-white/60">预算上限</div>
-                </div>
-              </div>
-            </div>
-
             <MapWorkspace
               route={smartRoute}
               plan={plan}
@@ -398,7 +391,7 @@ export function PlannerPage({ initialCity, initialPrompt = '' }: PlannerPageProp
               onSimulateNavigation={simulateNavigation}
             />
 
-          </section>
+          </section>}
         </div>
       </div>
     </main>
