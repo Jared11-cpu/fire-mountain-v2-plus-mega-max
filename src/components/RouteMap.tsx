@@ -15,13 +15,14 @@ export function RouteMap({ route, selectedPointId, onSelectPoint, mapOnly = fals
   const [status, setStatus] = useState<'loading'|'ready'|'fallback'>('loading');
   const [message, setMessage] = useState('正在载入高德真实地图…');
   const selected = route.points.find((p) => p.id === selectedPointId) ?? route.points[0];
+  const amapEnabled = import.meta.env.VITE_AMAP_ENABLED === 'true';
   const key = import.meta.env.VITE_AMAP_KEY as string | undefined;
   const securityCode = import.meta.env.VITE_AMAP_SECURITY_CODE as string | undefined;
 
   useEffect(() => {
     let disposed = false;
     async function mount() {
-      if (!key || !container.current) { setStatus('fallback'); setMessage('未配置高德 Key，当前仅展示演示路线点列表。'); return; }
+      if (!amapEnabled || !key || !container.current) { setStatus('fallback'); setMessage('演示地图模式：未启用真实高德地图，当前展示 AI 路线点列表。'); return; }
       try {
         if (securityCode) window._AMapSecurityConfig = { securityJsCode: securityCode };
         if (!window.AMap) await new Promise<void>((resolve, reject) => {
@@ -46,7 +47,7 @@ export function RouteMap({ route, selectedPointId, onSelectPoint, mapOnly = fals
       } catch { setStatus('fallback'); setMessage('真实地图加载失败，已安全回退到演示路线点列表。'); }
     }
     mount(); return () => { disposed = true; mapRef.current?.destroy(); mapRef.current = undefined; };
-  }, [route.id, key, securityCode]);
+  }, [route.id, amapEnabled, key, securityCode]);
 
   useEffect(() => {
     if (!selected || status !== 'ready' || !mapRef.current) return;

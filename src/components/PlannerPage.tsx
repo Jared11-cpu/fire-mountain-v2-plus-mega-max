@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Calculator, Camera, Check, Copy, Film, LocateFixed, Loader2, MapPin, MessageSquareText, Navigation, Route, Sparkles, Utensils } from 'lucide-react';
+import { Calculator, Camera, Check, Copy, Film, Image as ImageIcon, LocateFixed, Loader2, MapPin, MessageSquareText, Navigation, Route, Sparkles, Utensils } from 'lucide-react';
 import { budgetOptions, cities, dayOptions, examples, groupOptions, interestOptions, type CityName } from '../data/mockData';
 import { generateTravelPlan, type PlannerInput, type TravelPlan } from '../utils/aiGenerator';
 import { RouteMap } from './RouteMap';
 import { RouteInsightPanel } from './RouteInsightPanel';
 import { MapWorkspace } from './MapWorkspace';
+import { ItineraryImageCard } from './ItineraryImageCard';
 import { generateSmartRoute } from '../services/mapService';
 import { getBrowserLocation, makeMockLocation, mockLocationOptions } from '../services/locationService';
 import type { RoutePoint, SmartRoute, UserLocation } from '../types/route';
@@ -49,6 +50,7 @@ export function PlannerPage({ initialCity, initialPrompt = '' }: PlannerPageProp
   const [activePointIndex, setActivePointIndex] = useState(0);
   const [toast, setToast] = useState('已载入宜昌示例方案');
   const resultRef = useRef<HTMLDivElement>(null);
+  const imageCardRef = useRef<HTMLDivElement>(null);
   const navigationTimerRef = useRef<number>();
   const selectedCity = cities.find((city) => city.name === form.city) ?? cities[0];
 
@@ -372,9 +374,14 @@ export function PlannerPage({ initialCity, initialPrompt = '' }: PlannerPageProp
 
             <div className="flex flex-wrap gap-2">
               <ActionButton icon={Route} label="重新生成路线" onClick={regenerateRoute} />
+              <ActionButton icon={ImageIcon} label="查看行程图片" onClick={() => imageCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} />
               <ActionButton icon={Sparkles} label={showInsights ? '收起沿途记录点' : '查看沿途记录点'} onClick={() => setShowInsights((prev) => !prev)} />
               <ActionButton icon={Copy} label="复制小红书文案" onClick={copyRouteCopy} />
               <ActionButton icon={Navigation} label={navigating ? '导航模拟中' : '模拟导航'} onClick={simulateNavigation} disabled={navigating} />
+            </div>
+
+            <div ref={imageCardRef} className="scroll-mt-28">
+              <ItineraryImageCard plan={plan} route={smartRoute} />
             </div>
 
             <MapWorkspace route={smartRoute} plan={plan} selectedPointId={selectedPointId} activePointIndex={activePointIndex} navigating={navigating} imageUrl={selectedCity.imageUrl} onSelectPoint={selectRoutePoint} />
