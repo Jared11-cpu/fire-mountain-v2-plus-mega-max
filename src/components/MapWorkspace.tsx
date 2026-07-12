@@ -52,23 +52,23 @@ export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, n
           </div>
         </nav>
 
-        <div className="relative min-h-[68vh] overflow-hidden border-ink/10 lg:border-r">
+        <div className="relative min-h-[68vh] min-w-0 overflow-hidden border-ink/10 lg:border-r">
           <div className="absolute left-4 top-4 z-20 flex max-w-[calc(100%-2rem)] flex-wrap gap-2">
             <CommandButton icon={RefreshCw} label="重新规划" onClick={onRegenerate} />
             <CommandButton icon={Navigation} label={navigating ? '导航中' : '模拟导航'} onClick={onSimulateNavigation} disabled={navigating} />
             <CommandButton icon={Copy} label="复制文案" onClick={onCopySocial} />
           </div>
-          <div className="h-full">
+          <div className="h-full min-w-0">
             <RouteMap route={route} selectedPointId={selectedPointId} activePointIndex={activePointIndex} navigating={navigating} onSelectPoint={onSelectPoint} mapOnly />
           </div>
           <div className="pointer-events-none absolute bottom-5 left-5 right-5 z-20 grid gap-3 md:grid-cols-3">
             <Metric label="路线距离" value={`${route.totalDistanceKm}km`} />
             <Metric label="建议出发" value={route.recommendedStartTime} />
-            <Metric label="预计预算" value={`¥${budgetTotal(plan)}`} />
+            <Metric label="到达时间" value={selected?.time ?? route.recommendedStartTime} />
           </div>
         </div>
 
-        <aside className="flex min-h-0 flex-col bg-[#fffdf7]">
+        <aside className="flex min-h-0 min-w-0 flex-col bg-[#fffdf7]">
           <div className="border-b border-ink/10 p-4">
             <div className="text-[10px] font-black uppercase tracking-[0.2em] text-river">Interactive Itinerary</div>
             <h3 className="mt-1 font-display text-2xl font-black text-ink">{route.title}</h3>
