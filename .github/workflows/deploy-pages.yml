@@ -38,7 +38,7 @@ jobs:
         env:
           VITE_AMAP_KEY: ${{ secrets.VITE_AMAP_KEY }}
           VITE_AMAP_SECURITY_CODE: ${{ secrets.VITE_AMAP_SECURITY_CODE }}
-        run: pnpm exec tsc -b && pnpm exec vite build --base=/fire-moutain-cup-1/
+        run: pnpm exec tsc -b && pnpm exec vite build --base=/fire-mountain--1plus/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
