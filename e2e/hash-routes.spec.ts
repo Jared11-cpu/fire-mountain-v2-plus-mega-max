@@ -111,3 +111,21 @@ test('daily paper tasks can be completed and edited persistently', async ({ page
   await expect(completedTask).toContainText('09:05');
 });
 
+test('weather turns source data into practical itinerary advice', async ({ page }) => {
+  await page.route('https://api.open-meteo.com/**', async (route) => route.fulfill({ json: {
+    current: { time: '2026-07-14T10:00', temperature_2m: 34.2, apparent_temperature: 38.1, relative_humidity_2m: 82, precipitation: 0, weather_code: 1, wind_speed_10m: 15, wind_gusts_10m: 27 },
+    hourly: { time: Array.from({ length: 10 }, (_, index) => `2026-07-14T${String(10 + index).padStart(2, '0')}:00`), temperature_2m: [34, 35, 36, 36, 35, 34, 33, 32, 31, 30], precipitation_probability: [20, 30, 50, 70, 65, 45, 30, 20, 10, 10], weather_code: [1, 1, 2, 80, 80, 61, 3, 2, 1, 1] },
+    daily: { time: ['2026-07-14', '2026-07-15', '2026-07-16'], weather_code: [80, 3, 1], temperature_2m_max: [36, 33, 32], temperature_2m_min: [27, 26, 25], precipitation_probability_max: [70, 30, 10], sunrise: ['2026-07-14T05:40', '2026-07-15T05:41', '2026-07-16T05:41'], sunset: ['2026-07-14T19:38', '2026-07-15T19:38', '2026-07-16T19:37'], uv_index_max: [8.2, 6.4, 5.1] },
+  } }));
+  await page.goto('/#/planner');
+  await page.getByRole('button', { name: '规则引擎生成演示' }).click();
+  await page.getByRole('button', { name: '天气' }).click();
+  await expect(page.getByText('体感 38°')).toBeVisible();
+  await expect(page.getByText('降雨概率', { exact: true })).toBeVisible();
+  await expect(page.getByText('防暑优先', { exact: false })).toBeVisible();
+  await expect(page.getByText('紫外线指数最高 8.2', { exact: false })).toBeVisible();
+  await expect(page.getByText('接下来 8 小时')).toBeVisible();
+  await expect(page.getByText('日出')).toBeVisible();
+  await expect(page.getByText('Open‑Meteo Weather Forecast API')).toBeVisible();
+});
+
