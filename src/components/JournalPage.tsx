@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Camera, MapPin, Plus, Route, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { BookOpen, Camera, MapPin, Plus, Route, ShieldCheck, Trash2 } from 'lucide-react';
 import type { JournalEntry } from '../types/route';
 import { clearJournal, deletePhoto, loadPhoto, readEntries, savePhoto, writeEntries } from '../services/journalStorage';
 
@@ -69,14 +69,88 @@ export function JournalPage({ onPlan, initialFocus = null }: { onPlan: () => voi
 function JournalRouteMap({ entries, photos }: { entries: JournalEntry[]; photos: Record<string, string> }) {
   const chronological = [...entries].reverse();
   const points = chronological.length > 0 ? chronological : demoJournalStops;
-  const positions = points.map((_, index) => {
-    const t = points.length <= 1 ? 0.5 : index / (points.length - 1);
-    return {
-      x: 11 + t * 78,
-      y: 68 - Math.sin(t * Math.PI) * 38 + (index % 2 === 0 ? 4 : -6),
-    };
-  });
-  const line = positions.map((pos) => `${pos.x},${pos.y}`).join(' ');
+  const mapContainer = useRef<HTMLDivElement>(null);
+  const mapInstance = useRef<any>();
+  const [selectedId, setSelectedId] = useState(points[0]?.id ?? '');
+  const [mapStatus, setMapStatus] = useState('正在连接高德实时地图…');
+  const selected = points.find((entry) => entry.id === selectedId) ?? points[0];
+  const selectedPhotoId = selected?.photoIds?.[0];
+  const selectedPhoto = selectedPhotoId ? photos[selectedPhotoId] : '';
+  const key = import.meta.env.VITE_AMAP_KEY as string | undefined;
+  const securityCode = import.meta.env.VITE_AMAP_SECURITY_CODE as string | undefined;
+
+  useEffect(() => {
+    if (!points.some((entry) => entry.id === selectedId)) setSelectedId(points[0]?.id ?? '');
+  }, [points.map((entry) => entry.id).join('|')]);
+
+  useEffect(() => {
+    let disposed = false;
+    async function mountMap() {
+      if (!mapContainer.current || !key) {
+        setMapStatus('请配置高德 JS API Key 后显示实时地图');
+        return;
+      }
+      try {
+        if (securityCode) window._AMapSecurityConfig = { securityJsCode: securityCode };
+        if (!window.AMap) await new Promise<void>((resolve, reject) => {
+          const existing = document.querySelector<HTMLScriptElement>('script[data-amap]');
+          if (existing) {
+            if (window.AMap) resolve();
+            else {
+              existing.addEventListener('load', () => resolve(), { once: true });
+              existing.addEventListener('error', reject, { once: true });
+            }
+            return;
+          }
+          const script = document.createElement('script');
+          script.dataset.amap = 'true';
+          script.src = `https://webapi.amap.com/maps?v=2.0&key=${key}`;
+          script.onload = () => resolve();
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+        if (disposed || !mapContainer.current || !window.AMap) return;
+        const AMap = window.AMap;
+        const coordinates = points.map((entry, index) => journalCoordinate(entry, index));
+        const map = new AMap.Map(mapContainer.current, {
+          zoom: 7,
+          center: coordinates[0],
+          viewMode: '2D',
+          resizeEnable: true,
+          mapStyle: 'amap://styles/normal',
+          features: ['bg', 'road', 'building', 'point'],
+        });
+        mapInstance.current = map;
+        const line = new AMap.Polyline({
+          path: coordinates,
+          strokeColor: '#0E6B72',
+          strokeWeight: 6,
+          strokeOpacity: .88,
+          showDir: true,
+          lineJoin: 'round',
+        });
+        map.add(line);
+        const markers = points.map((entry, index) => {
+          const marker = new AMap.Marker({
+            position: coordinates[index],
+            anchor: 'bottom-center',
+            title: entry.pointName,
+            content: `<button class="amap-smart-marker journal-amap-marker" aria-label="${index + 1} ${entry.pointName}"><span>${index + 1}</span></button>`,
+            label: { content: `<span class="amap-route-name">${entry.pointName}</span>`, direction: 'bottom', offset: new AMap.Pixel(0, 8) },
+          });
+          marker.on('click', () => setSelectedId(entry.id));
+          map.add(marker);
+          return marker;
+        });
+        map.setFitView([line, ...markers], false, [70, 70, 70, 70]);
+        setMapStatus('高德实时地图 · 可缩放、拖动并点击记录点');
+      } catch {
+        setMapStatus('高德地图暂未加载，请检查 Key 与安全密钥');
+      }
+    }
+    mountMap();
+    return () => { disposed = true; mapInstance.current?.destroy(); mapInstance.current = undefined; };
+  }, [key, securityCode, points.map((entry) => `${entry.id}-${entry.city}`).join('|')]);
 
   return (
     <section className="journal-map mt-5 overflow-hidden rounded-[1.7rem] border border-ink/8 p-5 shadow-soft">
@@ -88,47 +162,39 @@ function JournalRouteMap({ entries, photos }: { entries: JournalEntry[]; photos:
         <p className="max-w-sm text-sm leading-6 text-ink/52">每个点位都保留照片和当时的感想，路线会随着你上传记录自动生长。</p>
       </div>
 
-      <div className="relative mt-5 min-h-[420px] overflow-hidden rounded-[1.4rem] bg-[#edf8f2]">
-        <div className="absolute inset-0 opacity-45 [background-image:linear-gradient(#0e6b7214_1px,transparent_1px),linear-gradient(90deg,#0e6b7214_1px,transparent_1px)] [background-size:38px_38px]" />
-        <div className="absolute -left-10 top-20 h-36 w-[120%] -rotate-6 rounded-full bg-[#79d7e8]/45 blur-[1px]" />
-        <div className="absolute bottom-0 right-0 h-44 w-2/3 rounded-tl-[50%] bg-[#b8ead1]/70" />
-        <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full">
-          <polyline points={line} fill="none" stroke="#fff" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
-          <polyline points={line} fill="none" stroke="#e75b3d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="5 3" />
-        </svg>
-
-        {points.map((entry, index) => {
-          const pos = positions[index];
-          const photoId = entry.photoIds?.[0];
-          const photo = photoId ? photos[photoId] : '';
-          return (
-            <div key={entry.id} className="absolute w-44 -translate-x-1/2 -translate-y-1/2" style={{ left: `${pos.x}%`, top: `${pos.y}%` }}>
-              <div className="relative">
-                <span className="absolute -left-3 -top-3 z-10 grid h-9 w-9 place-items-center rounded-full bg-ink text-sm font-black text-white shadow-lg">{index + 1}</span>
-                <div className="rotate-[-2deg] rounded-[1.1rem] bg-white p-2 shadow-xl ring-1 ring-ink/8 transition hover:rotate-0 hover:scale-[1.02]">
-                  <div className="aspect-[4/3] overflow-hidden rounded-xl bg-gradient-to-br from-jade/20 to-river/20">
-                    {photo ? <img src={photo} alt={`${entry.pointName}照片`} className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-center text-xs font-black text-river/75">上传<br/>照片</div>}
-                  </div>
-                  <div className="mt-2">
-                    <div className="truncate text-xs font-black text-tower">{entry.city}</div>
-                    <div className="journal-handwriting truncate text-xl font-black text-ink">{entry.pointName}</div>
-                    <p className="journal-handwriting mt-1 line-clamp-2 text-sm leading-5 text-ink/62">{entry.note || '这里等你写下自己的感想。'}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-
-        {entries.length === 0 && (
-          <div className="absolute inset-x-5 bottom-5 rounded-2xl bg-white/90 p-4 text-center shadow-lg backdrop-blur">
-            <div className="journal-handwriting text-2xl font-black text-ink">第一张照片，等你上路</div>
-            <p className="mt-1 text-sm text-ink/55">上传旅途中拍摄的照片和感想后，这里会自动变成你的路线地图。</p>
-          </div>
-        )}
+      <div className="relative mt-5 h-[420px] overflow-hidden rounded-[1.4rem] bg-[#e5efeb]">
+        <div ref={mapContainer} className="absolute inset-0" />
+        <div className="pointer-events-none absolute left-4 top-4 rounded-full bg-white/92 px-3 py-2 text-xs font-black text-river shadow-lg backdrop-blur">{mapStatus}</div>
       </div>
+
+      <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+        {points.map((entry, index) => <button key={entry.id} onClick={() => setSelectedId(entry.id)} className={`shrink-0 rounded-full px-4 py-2 text-xs font-black transition ${selected?.id === entry.id ? 'bg-ink text-white' : 'bg-white text-ink/55 hover:text-ink'}`}>{index + 1} · {entry.pointName}</button>)}
+      </div>
+
+      {selected && <article className="journal-notebook-lines mt-4 grid min-h-48 overflow-hidden rounded-[1.4rem] border border-ink/10 shadow-[0_18px_45px_rgba(18,34,42,.09)] md:grid-cols-[220px_1fr]">
+        <div className="relative min-h-44 bg-ink/5">
+          {selectedPhoto ? <img src={selectedPhoto} alt={`${selected.pointName}旅行照片`} className="absolute inset-0 h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-center text-ink/28"><Camera className="mb-2 h-7 w-7"/><span className="text-xs font-black">这一站等待真实照片</span></div>}
+        </div>
+        <div className="relative px-7 py-6 md:px-9">
+          <div className="absolute bottom-0 left-4 top-0 w-px bg-tower/25" />
+          <div className="flex items-center gap-2 text-[10px] font-black tracking-[.22em] text-tower"><BookOpen className="h-4 w-4"/>TRAVEL NOTE</div>
+          <div className="journal-handwriting mt-2 flex flex-wrap items-baseline gap-x-3 text-ink"><h3 className="text-3xl font-black">{selected.pointName}</h3><span className="text-lg text-ink/45">{selected.city}</span></div>
+          <p className="journal-handwriting mt-3 whitespace-pre-wrap text-xl leading-8 text-ink/72">{selected.note || '这一站没有文字，照片已经记住了当时的光。'}</p>
+        </div>
+      </article>}
     </section>
   );
+}
+
+const journalCityCoordinates: Record<string, [number, number]> = {
+  武汉: [114.3055, 30.5928], 宜昌: [111.2865, 30.6919], 恩施: [109.4882, 30.2722],
+  荆州: [112.2397, 30.3352], 襄阳: [112.1224, 32.009], 黄石: [115.0389, 30.1995],
+};
+
+function journalCoordinate(entry: JournalEntry, index: number): [number, number] {
+  const base = journalCityCoordinates[entry.city] ?? journalCityCoordinates.武汉;
+  const offset = index * .012;
+  return [base[0] + offset, base[1] + (index % 2 ? offset : -offset)];
 }
 
 const demoJournalStops: JournalEntry[] = [
