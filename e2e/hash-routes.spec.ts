@@ -129,3 +129,35 @@ test('weather turns source data into practical itinerary advice', async ({ page 
   await expect(page.getByText('Open‑Meteo Weather Forecast API')).toBeVisible();
 });
 
+test('transport adapter renders a truthful segmented smart plan', async ({ page }) => {
+  await page.goto('/#/planner');
+  await page.getByRole('button', { name: '规则引擎生成演示' }).click();
+  await page.getByRole('button', { name: '交通' }).click();
+  await expect(page.getByRole('heading', { name: '智能交通方案' })).toBeVisible();
+  await expect(page.getByText('规则引擎交通方案')).toBeVisible();
+  await expect(page.getByText('非实时估算')).toBeVisible();
+  await expect(page.getByText('第 1 段', { exact: false })).toBeVisible();
+  await expect(page.getByText('已预留 TransportPlanProvider 接口', { exact: false })).toBeVisible();
+});
+
+test('budget accepts direct amounts, persists, and scrolls without resizing the map', async ({ page }) => {
+  await page.goto('/#/planner');
+  await page.getByRole('button', { name: '规则引擎生成演示' }).click();
+  await page.getByRole('button', { name: '预算' }).click();
+  const map = page.getByRole('region', { name: '路线地图' });
+  const initialHeight = (await map.boundingBox())?.height;
+  const amount = page.getByLabel('交通金额');
+  await amount.fill('135');
+  await amount.press('Enter');
+  await page.getByLabel('交通备注').fill('含往返接驳费用');
+  for (let index = 0; index < 8; index += 1) await page.getByRole('button', { name: '新增预算条目' }).click();
+  await page.getByLabel('方案详情', { exact: true }).evaluate((element) => { const scroller = element.querySelector('[class*="overflow-y-auto"]'); if (scroller) scroller.scrollTop = scroller.scrollHeight; });
+  expect((await map.boundingBox())?.height).toBe(initialHeight);
+  await page.waitForTimeout(700);
+  await page.reload();
+  await page.getByRole('button', { name: '预算' }).click();
+  await expect(page.getByLabel('交通金额')).toHaveValue('135');
+  await expect(page.getByLabel('交通备注')).toHaveValue('含往返接驳费用');
+  await expect(page.getByText('12 项')).toBeVisible();
+});
+
