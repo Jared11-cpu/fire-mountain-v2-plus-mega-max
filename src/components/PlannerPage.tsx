@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Check, Copy, LocateFixed, Loader2, RotateCcw, Sparkles } from 'lucide-react';
+import { ArrowLeft, Check, LocateFixed, Loader2, RotateCcw, Sparkles } from 'lucide-react';
 import { cities, examples } from '../data/mockData';
-import { DIETARY_RESTRICTIONS, encodeSharePlan, INTERESTS, SPECIAL_NEEDS, TRAVELERS, type DietaryRestriction, type Interest, type SpecialNeed, type TravelerType } from '../domain/trip';
+import { DIETARY_RESTRICTIONS, INTERESTS, SPECIAL_NEEDS, TRAVELERS, type DietaryRestriction, type Interest, type SpecialNeed, type TravelerType } from '../domain/trip';
 import { getBrowserLocation } from '../services/locationService';
 import type { RoutePoint } from '../types/route';
 import { useTrip } from '../state/tripStore';
 import { MapWorkspace } from './MapWorkspace';
 
 export function PlannerPage() {
-  const { request, plan, parsedTags, parseWarnings, isReplanning, replanSummary, updateRequest, parseText, generate, replan, resetPlan, notify } = useTrip();
+  const { request, plan, parsedTags, parseWarnings, isReplanning, updateRequest, parseText, generate, replan, resetPlan, notify } = useTrip();
   const [resultMode, setResultMode] = useState(Boolean(plan));
   const [selectedPointId, setSelectedPointId] = useState<string | undefined>(plan?.route.points[0]?.id);
   const [locating, setLocating] = useState(false);
@@ -32,18 +32,6 @@ export function PlannerPage() {
     setLocating(false);
   };
 
-  const share = async () => {
-    if (!plan) return;
-    try {
-      const data = encodeSharePlan(plan);
-      const url = `${window.location.origin}${window.location.pathname}#/plan/${plan.id}?data=${data}`;
-      await navigator.clipboard.writeText(url);
-      notify('分享链接已复制；不包含照片、足迹或定位历史。', 'success');
-    } catch (error) {
-      notify(error instanceof Error ? error.message : '复制分享链接失败。', 'error');
-    }
-  };
-
   const toggle = <T extends string>(field: 'interests' | 'dietaryRestrictions' | 'specialNeeds', item: T) => {
     const values = request[field] as readonly string[];
     updateRequest({ [field]: values.includes(item) ? values.filter((value) => value !== item) : [...values, item] });
@@ -53,9 +41,7 @@ export function PlannerPage() {
     <main className="section-pad py-10">
       <div className="mx-auto max-w-7xl">
         <div className="mb-8">
-          <p className="text-sm font-black uppercase tracking-[0.2em] text-river">Rules-based Travel Planner</p>
-          <h1 className="mt-2 font-display text-4xl font-black text-ink md:text-5xl">懂你，也懂湖北</h1>
-          <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-ink/55">当前为规则引擎生成演示，不宣称已接入大模型。系统只根据你确认的结构化条件生成确定性方案。</p>
+          <h1 className="font-display text-4xl font-black text-ink md:text-5xl">懂你，也懂湖北</h1>
         </div>
 
         <div className={resultMode && plan ? 'space-y-5' : 'mx-auto max-w-5xl'}>
@@ -99,9 +85,8 @@ export function PlannerPage() {
 
           {resultMode && plan && <section ref={resultRef} className="space-y-4 scroll-mt-28">
             <div className="flex flex-col justify-between gap-3 rounded-[1.5rem] bg-white/80 p-4 shadow-sm ring-1 ring-ink/5 md:flex-row md:items-center">
-              <div><div className="text-xs font-black uppercase tracking-[0.18em] text-river">RULES-V1 ROUTE WORKSPACE</div><h2 className="mt-1 font-display text-2xl font-black text-ink">{plan.route.title}</h2>{replanSummary && <p className="mt-1 text-xs font-bold text-ink/55" aria-live="polite">{replanSummary}</p>}</div>
+              <div><div className="text-xs font-black uppercase tracking-[0.18em] text-river">RULES-V1 ROUTE WORKSPACE</div><h2 className="mt-1 font-display text-2xl font-black text-ink">{plan.route.title}</h2></div>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={share} className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-black text-ink shadow-sm"><Copy className="h-4 w-4" />分享</button>
                 <button type="button" onClick={() => { if (window.confirm('重置当前方案？真实手账和照片会保留。')) { resetPlan(); setResultMode(false); } }} className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-black text-ink shadow-sm"><RotateCcw className="h-4 w-4" />重置方案</button>
                 <button type="button" onClick={() => setResultMode(false)} className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-black text-white"><ArrowLeft className="h-4 w-4" />返回修改</button>
               </div>
@@ -122,3 +107,4 @@ function Field({ label, htmlFor, children }: { label: string; htmlFor?: string; 
 function ChoiceGroup<T extends string>({ label, values, selected, onToggle }: { label: string; values: readonly T[]; selected: readonly T[]; onToggle: (item: T) => void }) {
   return <fieldset className="mb-5"><legend className="mb-2 text-sm font-black text-ink/72">{label}</legend><div className="flex flex-wrap gap-2">{values.map((item) => <button type="button" key={item} aria-pressed={selected.includes(item)} onClick={() => onToggle(item)} className={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-black transition ${selected.includes(item) ? 'bg-jade text-white' : 'bg-white/70 text-ink/60'}`}>{selected.includes(item) && <Check className="h-3.5 w-3.5" />}{item}</button>)}</div></fieldset>;
 }
+
