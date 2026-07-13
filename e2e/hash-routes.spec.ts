@@ -43,3 +43,28 @@ test('edits survive detail tab switches and refresh', async ({ page }) => {
   await page.getByRole('button', { name: '行程记录' }).click();
   await expect(page.getByLabel('当日备注').first()).toHaveValue('切换标签后必须保留');
 });
+
+test('overview metrics are directly editable and persist', async ({ page }) => {
+  await page.goto('/#/planner');
+  await page.getByRole('button', { name: '规则引擎生成演示' }).click();
+  await expect(page.getByText('当前为规则引擎生成演示', { exact: false })).toHaveCount(0);
+  await expect(page.getByText('RULES-BASED TRAVEL PLANNER', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('已根据当前确认参数生成规则路线。', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '分享' })).toHaveCount(0);
+
+  await page.getByLabel('总览点位').fill('4');
+  await page.getByLabel('总览点位').press('Enter');
+  await page.getByLabel('总览预计时长').fill('6.5');
+  await page.getByLabel('总览预计时长').press('Enter');
+  await page.getByLabel('总览预算总计').fill('750');
+  await page.getByLabel('总览预算总计').press('Enter');
+  await page.getByLabel('总览出发日期').fill('2026-08-01');
+  await page.waitForTimeout(500);
+
+  await page.reload();
+  await expect(page.getByLabel('总览点位')).toHaveValue('4');
+  await expect(page.getByLabel('总览预计时长')).toHaveValue('6.5');
+  await expect(page.getByLabel('总览预算总计')).toHaveValue('750');
+  await expect(page.getByLabel('总览出发日期')).toHaveValue('2026-08-01');
+});
+
