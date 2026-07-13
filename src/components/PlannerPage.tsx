@@ -195,7 +195,6 @@ export function PlannerPage({ initialCity, initialPrompt = '' }: PlannerPageProp
           <div>
             <p className="text-sm font-black uppercase tracking-[0.2em] text-river">AI Travel Planner</p>
             <h1 className="mt-2 font-display text-4xl font-black text-ink md:text-5xl">懂你，也懂湖北</h1>
-            <p className="mt-4 max-w-2xl text-ink/65">输入需求，生成路线、预算、打卡点和传播文案。</p>
           </div>
         </div>
 
