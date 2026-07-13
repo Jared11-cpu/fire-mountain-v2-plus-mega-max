@@ -5,10 +5,10 @@ import { getPointTypeLabel } from '../services/mapService';
 
 declare global { interface Window { AMap?: any; _AMapSecurityConfig?: { securityJsCode: string } } }
 
-type Props = { route: SmartRoute; selectedPointId?: string; activePointIndex: number; navigating: boolean; onSelectPoint: (point: RoutePoint) => void; mapOnly?: boolean };
+type Props = { route: SmartRoute; selectedPointId?: string; activePointIndex: number; navigating: boolean; onSelectPoint: (point: RoutePoint) => void; onDistanceCalculated?: (distanceKm: number) => void; mapOnly?: boolean };
 const icons: Record<RoutePoint['type'], typeof MapPin> = { start: Navigation, scenic: MapPin, food: Utensils, photo: Camera, rest: Clock3, hotel: MapPin, end: RouteIcon };
 
-export function RouteMap({ route, selectedPointId, onSelectPoint, mapOnly = false }: Props) {
+export function RouteMap({ route, selectedPointId, onSelectPoint, onDistanceCalculated, mapOnly = false }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>();
   const markerRef = useRef<any[]>([]);
@@ -49,6 +49,7 @@ export function RouteMap({ route, selectedPointId, onSelectPoint, mapOnly = fals
 
         markerRef.current = route.points.map((point, index) => createRouteMarker(AMap, map, point, index, onSelectPoint));
         const routeResult = await drawAmapDrivingRoute(AMap, map, route.points);
+        if (routeResult.distanceKm) onDistanceCalculated?.(routeResult.distanceKm);
         window.requestAnimationFrame(() => map.resize?.());
         map.setFitView([routeResult.overlay, ...markerRef.current].filter(Boolean), false, [90, 90, 90, 90]);
         if (routeResult.planned) {
@@ -74,7 +75,7 @@ export function RouteMap({ route, selectedPointId, onSelectPoint, mapOnly = fals
 
   return <section className={`min-w-0 overflow-hidden bg-white ${mapOnly ? 'h-full' : 'rounded-[1.75rem] shadow-soft ring-1 ring-ink/5'}`}>
     {!mapOnly && <div className="flex flex-col gap-4 border-b border-ink/5 p-5 md:flex-row md:items-center md:justify-between"><div><div className="inline-flex items-center gap-2 text-xs font-black tracking-[.16em] text-river"><Navigation className="h-4 w-4"/>LIVE ROUTE</div><h3 className="mt-2 font-display text-2xl font-black">{route.title}</h3><p className="mt-1 text-sm text-ink/50">{message}</p></div><div className="flex gap-2 text-xs font-bold"><span className="rounded-full bg-mist px-3 py-2">{route.totalDistanceKm} km</span><span className="rounded-full bg-mist px-3 py-2">{route.recommendedStartTime} 出发</span></div></div>}
-      <div className={mapOnly ? 'h-full min-w-0' : 'grid min-w-0 lg:grid-cols-[1.35fr_.65fr]'}><div className={`relative min-w-0 overflow-hidden bg-[#d8f1ee] ${mapOnly ? 'h-full min-h-[620px]' : 'min-h-[430px]'}`}><div ref={container} className={`absolute inset-0 ${fallback || raster ? 'hidden' : ''}`}/>{mapOnly&&<div className="absolute left-5 top-5 z-10 max-w-sm rounded-2xl bg-white/90 p-4 shadow-lg backdrop-blur"><div className="text-xs font-black tracking-[.16em] text-river">LIVE ROUTE · {route.totalDistanceKm} KM</div><h3 className="mt-1 font-display text-xl font-black">{route.title}</h3><p className="mt-1 text-xs text-ink/50">{message}</p></div>}{raster&&<GaodeRasterRouteMap route={route} selectedPointId={selectedPointId} onSelectPoint={onSelectPoint} />}{fallback&&<FallbackRouteMap route={route} selectedPointId={selectedPointId} onSelectPoint={onSelectPoint} />}</div>
+      <div className={mapOnly ? 'h-full min-w-0' : 'grid min-w-0 lg:grid-cols-[1.35fr_.65fr]'}><div className={`relative min-w-0 overflow-hidden bg-[#d8f1ee] ${mapOnly ? 'h-full min-h-[620px]' : 'min-h-[430px]'}`}><div ref={container} className={`absolute inset-0 ${fallback || raster ? 'hidden' : ''}`}/>{raster&&<GaodeRasterRouteMap route={route} selectedPointId={selectedPointId} onSelectPoint={onSelectPoint} />}{fallback&&<FallbackRouteMap route={route} selectedPointId={selectedPointId} onSelectPoint={onSelectPoint} />}</div>
       {!mapOnly&&<aside className="bg-[#fbfaf5] p-5">{selected&&<><div className="text-xs font-black tracking-[.16em] text-tower">STOP {route.points.findIndex(p=>p.id===selected.id)+1}</div><h4 className="mt-2 font-display text-3xl font-black">{selected.name}</h4><div className="mt-2 flex gap-2 text-xs font-bold text-ink/50"><span>{getPointTypeLabel(selected.type)}</span><span>·</span><span>{selected.time}</span><span>·</span><span>{selected.stayMinutes} 分钟</span></div><p className="mt-5 leading-7 text-ink/68">{selected.reason}</p><div className="mt-4 rounded-xl border-l-4 border-tower bg-white p-4 text-sm leading-6"><b>拍照：</b>{selected.photoTip}</div><div className="mt-3 rounded-xl bg-river/5 p-4 text-sm leading-6"><b>手账：</b>{selected.recordTip}</div></>}</aside>}
     </div>
   </section>;
@@ -99,7 +100,7 @@ function createRouteMarker(AMap: any, map: any, point: RoutePoint, index: number
 }
 
 function drawAmapDrivingRoute(AMap: any, map: any, points: RoutePoint[]) {
-  return new Promise<{ overlay: any; planned: boolean }>((resolve, reject) => {
+  return new Promise<{ overlay: any; planned: boolean; distanceKm?: number }>((resolve, reject) => {
     const path = points.map((point) => [point.lng, point.lat]);
     const lngLats = points.map((point) => new AMap.LngLat(point.lng, point.lat));
     const fallbackLine = () => {
@@ -131,9 +132,10 @@ function drawAmapDrivingRoute(AMap: any, map: any, points: RoutePoint[]) {
         const start = lngLats[0];
         const end = lngLats[lngLats.length - 1];
         const waypoints = lngLats.slice(1, -1);
-        driving.search(start, end, { waypoints }, (status: string) => {
+        driving.search(start, end, { waypoints }, (status: string, result: any) => {
           if (status === 'complete') {
-            resolve({ overlay: driving, planned: true });
+            const distanceMeters = result?.routes?.[0]?.distance;
+            resolve({ overlay: driving, planned: true, distanceKm: distanceMeters ? Number((distanceMeters / 1000).toFixed(1)) : undefined });
           } else {
             fallbackLine();
           }
