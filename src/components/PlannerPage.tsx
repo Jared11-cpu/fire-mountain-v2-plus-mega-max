@@ -6,7 +6,6 @@ import { MapWorkspace } from './MapWorkspace';
 import { generateSmartRoute } from '../services/mapService';
 import { getBrowserLocation, makeMockLocation, mockLocationOptions } from '../services/locationService';
 import type { RoutePoint, SmartRoute, UserLocation } from '../types/route';
-import { BrandMark } from './Logo';
 
 type PlannerPageProps = {
   initialCity: CityName;
@@ -45,7 +44,7 @@ export function PlannerPage({ initialCity, initialPrompt = '' }: PlannerPageProp
   const [resultMode, setResultMode] = useState(false);
   const [navigating, setNavigating] = useState(false);
   const [activePointIndex, setActivePointIndex] = useState(0);
-  const [toast, setToast] = useState('已载入宜昌示例方案');
+  const [, setToast] = useState('');
   const resultRef = useRef<HTMLDivElement>(null);
   const navigationTimerRef = useRef<number>();
   const selectedCity = cities.find((city) => city.name === form.city) ?? cities[0];
@@ -187,25 +186,16 @@ export function PlannerPage({ initialCity, initialPrompt = '' }: PlannerPageProp
   return (
     <main className="section-pad py-10">
       <div className="mx-auto max-w-7xl">
-        <div className="mb-8 flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
+        <div className="mb-8">
           <div>
             <p className="text-sm font-black uppercase tracking-[0.2em] text-river">AI Travel Planner</p>
             <h1 className="mt-2 font-display text-4xl font-black text-ink md:text-5xl">一句话生成完整湖北旅行方案</h1>
             <p className="mt-4 max-w-2xl text-ink/65">输入需求，生成路线、预算、打卡点和传播文案。</p>
           </div>
-          <div className="rounded-full bg-ink px-5 py-3 text-sm font-bold text-white shadow-soft">{toast}</div>
         </div>
 
         <div className={resultMode ? 'space-y-5' : 'mx-auto max-w-5xl'}>
           {!resultMode && <section className="glass rounded-[1.75rem] p-5 shadow-soft">
-            <div className="mb-5 flex items-center gap-3">
-              <BrandMark compact />
-              <div>
-                <h2 className="font-display text-2xl font-black text-ink">需求输入</h2>
-                <p className="text-sm text-ink/55">选择条件或直接说人话</p>
-              </div>
-            </div>
-
             <Field label="目的地城市">
               <div className="grid grid-cols-3 gap-2">
                 {cities.map((city) => (
