@@ -223,10 +223,19 @@ function StopsPanel({ route, selectedPointId, imageUrl, onSelectPoint }: { route
             </div>
             <div className="space-y-4 p-5">
               <div className="grid gap-3 md:grid-cols-2">
-                <DetailInfo title="推荐理由" text={detailPoint.reason} />
-                <DetailInfo title="记录建议" text={detailPoint.recordTip} />
-                <DetailInfo title="拍照建议" text={detailPoint.photoTip} />
-                <DetailInfo title="预算参考" text={`约 ¥${detailPoint.estimatedCost ?? (detailPoint.type === 'food' ? 50 : 0)}，实际以现场价格为准。`} />
+                <DetailInfo title="地点简介" text={placeIntroduction(detailPoint)} />
+                <DetailInfo title="开放与停留" text={`${detailPoint.openingHours ?? '开放时间以场馆或景区公告为准'}；建议停留约 ${detailPoint.stayMinutes} 分钟。`} />
+                <DetailInfo title="交通与到达" text={`${transportModeLabel(detailPoint.transportMode)}；坐标 ${detailPoint.lat.toFixed(4)}, ${detailPoint.lng.toFixed(4)}。出发前建议在地图中确认实时路况与入口。`} />
+                <DetailInfo title="费用与提示" text={`参考费用约 ¥${detailPoint.estimatedCost ?? (detailPoint.type === 'food' ? 50 : 0)}。票价、预约与开放政策可能调整，请以地点官方信息为准。`} />
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                <a href={amapPlaceUrl(detailPoint)} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-xl bg-river px-4 py-3 text-sm font-black text-white transition hover:bg-ink active:scale-95">
+                  在高德地图查看<ExternalLink className="h-4 w-4" />
+                </a>
+                <a href={placeResearchUrl(detailPoint)} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-xl border border-ink/10 bg-white px-4 py-3 text-sm font-black text-ink transition hover:border-river/25 hover:text-river active:scale-95">
+                  搜索官方与百科资料<ExternalLink className="h-4 w-4" />
+                </a>
               </div>
 
               <div className="rounded-2xl border border-river/15 bg-white p-4">
@@ -538,6 +547,30 @@ function RealPlaceImage({query,fallback,alt}:{query:string;fallback:string;alt:s
 
 function budgetTotal(plan: TravelPlan) {
   return plan.budget.reduce((sum, row) => sum + row.amount, 0);
+}
+
+function placeIntroduction(point: RoutePoint) {
+  if (point.type === 'start' || point.type === 'end') {
+    return `${point.name}是本次${point.city}行程的交通衔接点，可用于确认集合、换乘和返程安排。`;
+  }
+  const reason = /Mock|演示路线/.test(point.reason) ? '' : point.reason;
+  return reason || `${point.name}位于${point.city}，属于本次路线中的${getPointTypeLabel(point.type)}点位，可结合现场导览了解其历史、景观与游览信息。`;
+}
+
+function transportModeLabel(mode?: RoutePoint['transportMode']) {
+  if (mode === 'walk') return '建议步行到达或衔接周边公共交通';
+  if (mode === 'transit') return '建议优先查询实时公交或轨道交通';
+  if (mode === 'drive') return '建议驾车前确认停车场、入口与实时路况';
+  return '建议使用高德地图查询当前出发地到该地点的实时路线';
+}
+
+function amapPlaceUrl(point: RoutePoint) {
+  const params = new URLSearchParams({ keyword: `${point.city} ${point.name}`, city: point.city, view: 'map', src: 'chuyou-ai', callnative: '0' });
+  return `https://uri.amap.com/search?${params.toString()}`;
+}
+
+function placeResearchUrl(point: RoutePoint) {
+  return `https://www.baidu.com/s?wd=${encodeURIComponent(`${point.city} ${point.name} 官方 介绍`)}`;
 }
 
 function toInputDate(date: Date) {
