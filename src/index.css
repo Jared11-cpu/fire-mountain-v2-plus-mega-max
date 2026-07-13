@@ -64,6 +64,69 @@ body {
   background-position: 0 16px;
 }
 
+.journal-map-pin {
+  position: relative;
+  display: block;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.journal-map-pin-number {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 3px solid white;
+  border-radius: 999px;
+  background: #0e6b72;
+  color: white;
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: 0 8px 20px rgba(18,34,42,.24);
+}
+
+.journal-map-note {
+  position: absolute;
+  top: -16px;
+  display: flex;
+  width: 138px;
+  min-height: 66px;
+  overflow: hidden;
+  border: 1px solid rgba(18,34,42,.1);
+  border-radius: 12px;
+  background: rgba(255,253,245,.96);
+  color: #12222a;
+  text-align: left;
+  box-shadow: 0 12px 28px rgba(18,34,42,.16);
+  backdrop-filter: blur(10px);
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+
+.journal-map-pin-right .journal-map-note { left: 42px; }
+.journal-map-pin-left .journal-map-note { right: 42px; }
+.journal-map-pin:hover .journal-map-note { transform: translateY(-3px); box-shadow: 0 16px 34px rgba(18,34,42,.22); }
+.journal-map-note img { width: 48px; min-height: 66px; object-fit: cover; }
+.journal-map-note-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; padding: 9px 10px; }
+.journal-map-note-copy strong { overflow: hidden; font-size: 11px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
+.journal-map-note-copy em {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  color: rgba(18,34,42,.68);
+  font-family: "STKaiti", "KaiTi", "华文楷体", cursive;
+  font-size: 13px;
+  font-style: normal;
+  line-height: 18px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .amap-route-label {
   display: grid;
   width: 28px;
