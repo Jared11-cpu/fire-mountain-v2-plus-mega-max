@@ -28,8 +28,7 @@ export function LandingPage({ onStart, onCitySelect, onFootprintDetail }: Landin
             <h1 className="font-display text-5xl font-black leading-[1.08] text-ink sm:text-6xl lg:text-7xl">
               一句话，走懂湖北
             </h1>
-            <p className="mx-auto mt-4 max-w-2xl text-lg font-medium leading-8 text-ink/60">AI 把路线、地图、预算与真实旅行记录整理成一份可以直接出发的行程。</p>
-            <form onSubmit={(event) => { event.preventDefault(); submitPrompt(); }} className="mx-auto mt-7 flex w-full max-w-2xl items-center gap-2 rounded-full border border-ink/10 bg-white/92 px-5 py-3 text-left shadow-soft transition focus-within:border-river/40 focus-within:ring-4 focus-within:ring-river/10">
+            <form onSubmit={(event) => { event.preventDefault(); submitPrompt(); }} className="mx-auto mt-8 flex w-full max-w-2xl items-center gap-2 rounded-full border border-ink/10 bg-white/92 px-5 py-3 text-left shadow-soft transition focus-within:border-river/40 focus-within:ring-4 focus-within:ring-river/10">
               <input
                 aria-label="旅行需求"
                 value={prompt}
@@ -56,8 +55,7 @@ export function LandingPage({ onStart, onCitySelect, onFootprintDetail }: Landin
         <div className="mx-auto max-w-7xl">
           <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <div>
-              <p className="text-sm font-black uppercase tracking-[0.2em] text-river">City Entrances</p>
-              <h2 className="mt-2 font-display text-4xl font-black text-ink">湖北城市入口</h2>
+              <h2 className="font-display text-4xl font-black text-ink">湖北城市入口</h2>
             </div>
             <p className="max-w-xl text-ink/60">选择城市，快速生成专属湖北路线。</p>
           </div>
