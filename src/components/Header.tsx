@@ -32,6 +32,7 @@ export function Header({ page, nav, onNavigate }: HeaderProps) {
             <button
               key={item.id}
               onClick={() => onNavigate(item.id)}
+              aria-pressed={page === item.id}
               className={`relative z-10 rounded-full px-1.5 py-2 text-[11px] font-black transition-colors duration-300 active:scale-95 sm:px-4 sm:text-sm ${
                 page === item.id
                   ? 'text-white'
