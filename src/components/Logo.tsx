@@ -16,11 +16,14 @@ export function Logo() {
     <div className="flex items-center gap-2.5">
       <BrandMark />
       <div className="leading-none">
-        <div className="flex items-baseline gap-1.5">
-          <span className="font-display text-[1.25rem] font-black tracking-[.04em] text-ink">楚游智导</span>
-          <span className="rounded-full bg-tower px-1.5 py-0.5 text-[10px] font-black leading-none tracking-[0.08em] text-white">AI</span>
+        <div className="flex items-end gap-1.5 whitespace-nowrap">
+          <span className="font-display text-[1.32rem] font-black tracking-[.08em] text-ink">楚游</span>
+          <span className="pb-[2px] text-[.95rem] font-black tracking-[.12em] text-river">智导</span>
+          <span className="mb-[1px] rounded-md bg-tower px-1.5 py-1 text-[8px] font-black leading-none tracking-[0.12em] text-white">AI</span>
         </div>
-        <div className="mt-1.5 text-[10px] font-black tracking-[0.16em] text-river">湖北旅行智能体</div>
+        <div className="mt-1.5 flex items-center gap-1.5 whitespace-nowrap text-[8px] font-black tracking-[0.2em] text-ink/48">
+          <span className="h-px w-4 bg-jade" />湖北 · AI 旅行智能体
+        </div>
       </div>
     </div>
   );
