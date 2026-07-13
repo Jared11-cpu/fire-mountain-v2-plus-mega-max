@@ -51,13 +51,15 @@ export function RouteMap({ route, selectedPointId, onSelectPoint, onDistanceCalc
         const routeResult = await drawAmapDrivingRoute(AMap, map, route.points);
         if (routeResult.distanceKm) onDistanceCalculated?.(routeResult.distanceKm);
         window.requestAnimationFrame(() => map.resize?.());
-        map.setFitView([routeResult.overlay, ...markerRef.current].filter(Boolean), false, [90, 90, 90, 90]);
+        map.setFitView([...routeResult.overlays, ...markerRef.current], false, [90, 90, 90, 90]);
         if (routeResult.planned) {
           setStatus('ready');
           setMessage('高德地图已连接，已按真实道路生成实时导航路线。');
         } else {
           setStatus('ready');
-          setMessage('高德 JS API 实时底图已显示，路径规划服务不可用时已叠加可缩放拖动的 AI 路线。');
+          setMessage(routeResult.realLegs > 0
+            ? `已按真实道路生成 ${routeResult.realLegs} 段路线；另有 ${routeResult.failedLegs} 段暂未获得导航结果，未使用直线替代。`
+            : '高德底图已显示，但路径规划服务未返回道路路线。请检查 JS API Key、安全密钥和域名白名单。');
         }
       } catch { setStatus('raster'); setMessage('真实地图加载失败，已切换高德底图瓦片并保留实时路线点。'); }
     }
@@ -99,52 +101,128 @@ function createRouteMarker(AMap: any, map: any, point: RoutePoint, index: number
   return marker;
 }
 
-function drawAmapDrivingRoute(AMap: any, map: any, points: RoutePoint[]) {
-  return new Promise<{ overlay: any; planned: boolean; distanceKm?: number }>((resolve, reject) => {
-    const path = points.map((point) => [point.lng, point.lat]);
-    const lngLats = points.map((point) => new AMap.LngLat(point.lng, point.lat));
-    const fallbackLine = () => {
-      const line = new AMap.Polyline({
-        path,
-        strokeColor: '#0E6B72',
-        strokeWeight: 8,
-        strokeOpacity: 0.9,
-        showDir: true,
-        lineJoin: 'round',
-      });
-      map.add(line);
-      resolve({ overlay: line, planned: false });
-    };
+async function drawAmapDrivingRoute(AMap: any, map: any, points: RoutePoint[]) {
+  const emptyResult = { overlays: [] as any[], planned: false, realLegs: 0, failedLegs: Math.max(0, points.length - 1), distanceKm: undefined as number | undefined };
+  if (points.length < 2 || !AMap.plugin) return emptyResult;
 
-    if (points.length < 2 || !AMap.plugin) {
-      fallbackLine();
+  await loadAmapPlugin(AMap, 'AMap.Driving');
+  const coordinates: [number, number][] = points.map((point) => [point.lng, point.lat]);
+
+  // Prefer one complete request so 高德 can optimize every stop as one route.
+  // JS API 2.0 requires coordinate arrays here; passing AMap.LngLat objects as
+  // waypoints can make the service reject the request and trigger a fake line.
+  const completeRoute = await searchDrivingPath(AMap, coordinates);
+  if (completeRoute.path.length > 1) {
+    const overlay = addRoadPolyline(AMap, map, completeRoute.path);
+    return {
+      overlays: [overlay],
+      planned: true,
+      realLegs: points.length - 1,
+      failedLegs: 0,
+      distanceKm: completeRoute.distanceMeters ? Number((completeRoute.distanceMeters / 1000).toFixed(1)) : undefined,
+    };
+  }
+
+  // A scenic-area entrance can occasionally make a multi-stop request fail.
+  // Replan each adjacent leg so one unavailable stop does not erase the other
+  // real road geometries. Failed legs are intentionally left blank: we never
+  // draw a straight connector and call it a navigation route.
+  const overlays: any[] = [];
+  let distanceMeters = 0;
+  let realLegs = 0;
+  for (let index = 1; index < coordinates.length; index += 1) {
+    const leg = await searchDrivingPath(AMap, [coordinates[index - 1], coordinates[index]]);
+    if (leg.path.length < 2) continue;
+    overlays.push(addRoadPolyline(AMap, map, leg.path));
+    distanceMeters += leg.distanceMeters;
+    realLegs += 1;
+  }
+
+  return {
+    overlays,
+    planned: realLegs === points.length - 1,
+    realLegs,
+    failedLegs: points.length - 1 - realLegs,
+    distanceKm: distanceMeters > 0 ? Number((distanceMeters / 1000).toFixed(1)) : undefined,
+  };
+}
+
+function loadAmapPlugin(AMap: any, plugin: string) {
+  return new Promise<void>((resolve, reject) => {
+    try {
+      AMap.plugin(plugin, resolve);
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function searchDrivingPath(AMap: any, coordinates: [number, number][]) {
+  return new Promise<{ path: any[]; distanceMeters: number }>((resolve) => {
+    if (coordinates.length < 2) {
+      resolve({ path: [], distanceMeters: 0 });
       return;
     }
-
-    AMap.plugin('AMap.Driving', () => {
-      try {
-        const driving = new AMap.Driving({
-          map,
-          hideMarkers: true,
-          showTraffic: true,
-          policy: AMap.DrivingPolicy?.LEAST_TIME,
+    try {
+      const driving = new AMap.Driving({
+        policy: AMap.DrivingPolicy?.LEAST_TIME ?? 0,
+        extensions: 'all',
+        ferry: 0,
+      });
+      const start = coordinates[0];
+      const end = coordinates[coordinates.length - 1];
+      const waypoints = coordinates.slice(1, -1);
+      const callback = (status: string, result: any) => {
+        const route = status === 'complete' ? result?.routes?.[0] : undefined;
+        resolve({
+          path: extractDrivingPath(route),
+          distanceMeters: Number(route?.distance) || 0,
         });
-        const start = lngLats[0];
-        const end = lngLats[lngLats.length - 1];
-        const waypoints = lngLats.slice(1, -1);
-        driving.search(start, end, { waypoints }, (status: string, result: any) => {
-          if (status === 'complete') {
-            const distanceMeters = result?.routes?.[0]?.distance;
-            resolve({ overlay: driving, planned: true, distanceKm: distanceMeters ? Number((distanceMeters / 1000).toFixed(1)) : undefined });
-          } else {
-            fallbackLine();
-          }
-        });
-      } catch {
-        reject(new Error('AMap driving route failed'));
-      }
-    });
+      };
+      if (waypoints.length > 0) driving.search(start, end, { waypoints }, callback);
+      else driving.search(start, end, callback);
+    } catch {
+      resolve({ path: [], distanceMeters: 0 });
+    }
   });
+}
+
+function extractDrivingPath(route: any) {
+  const path: any[] = [];
+  for (const step of route?.steps ?? []) {
+    for (const point of step?.path ?? []) {
+      const previous = path[path.length - 1];
+      const lng = typeof point?.getLng === 'function' ? point.getLng() : Number(point?.lng ?? point?.[0]);
+      const lat = typeof point?.getLat === 'function' ? point.getLat() : Number(point?.lat ?? point?.[1]);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+      if (!previous || previous[0] !== lng || previous[1] !== lat) path.push([lng, lat]);
+    }
+  }
+  return path;
+}
+
+function addRoadPolyline(AMap: any, map: any, path: any[]) {
+  const outline = new AMap.Polyline({
+    path,
+    strokeColor: '#ffffff',
+    strokeWeight: 12,
+    strokeOpacity: 0.92,
+    lineJoin: 'round',
+    lineCap: 'round',
+    zIndex: 45,
+  });
+  const routeLine = new AMap.Polyline({
+    path,
+    strokeColor: '#0E6B72',
+    strokeWeight: 7,
+    strokeOpacity: 0.96,
+    showDir: true,
+    lineJoin: 'round',
+    lineCap: 'round',
+    zIndex: 46,
+  });
+  map.add([outline, routeLine]);
+  return routeLine;
 }
 
 function pointColor(type: RoutePoint['type']) {
@@ -177,7 +255,6 @@ function GaodeRasterRouteMap({ route, selectedPointId, onSelectPoint }: { route:
       y: world.y - centerWorld.y + 350,
     };
   });
-  const line = projected.map((item) => `${item.x},${item.y}`).join(' ');
   const tileCenter = {
     x: Math.floor(centerWorld.x / 256),
     y: Math.floor(centerWorld.y / 256),
@@ -205,11 +282,6 @@ function GaodeRasterRouteMap({ route, selectedPointId, onSelectPoint }: { route:
             style={{ left: tile.originX, top: tile.originY, width: 256, height: 256 }}
           />
         ))}
-        <svg viewBox="0 0 1000 700" className="absolute inset-0 h-full w-full">
-          <polyline points={line} fill="none" stroke="#ffffff" strokeWidth="17" strokeLinecap="round" strokeLinejoin="round" opacity=".95" />
-          <polyline points={line} fill="none" stroke="#0e6b72" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="18 12" />
-          <polyline points={line} fill="none" stroke="#22d3ee" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity=".8" />
-        </svg>
         {projected.map(({ point, x, y }, index) => {
           const active = point.id === selectedPointId;
           return (
@@ -235,7 +307,7 @@ function GaodeRasterRouteMap({ route, selectedPointId, onSelectPoint }: { route:
       </div>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-white/55 to-transparent" />
       <div className="absolute bottom-3 left-3 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black text-ink/60 shadow-sm">高德地图底图 · AutoNavi</div>
-      <div className="absolute bottom-3 right-3 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black text-river shadow-sm">实时路线叠加 · 可点击点位</div>
+      <div className="absolute bottom-3 right-3 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black text-tower shadow-sm">路线服务未连接 · 不显示虚假直线</div>
     </div>
   );
 }
