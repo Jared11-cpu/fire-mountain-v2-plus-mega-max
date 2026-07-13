@@ -4,6 +4,7 @@ export function BrandMark({ compact = false }: { compact?: boolean }) {
       <svg viewBox="0 0 64 64" role="img" aria-label="楚游智导 AI 标识" className="h-full w-full">
         <path d="M15 43 C24 43 26 23 38 23 H47" fill="none" stroke="#F8FFFC" strokeWidth="4" strokeLinecap="round"/>
         <circle cx="48" cy="23" r="4" fill="#D35236"/>
+        <text x="43" y="51" fill="#2FB98E" fontSize="7" fontWeight="900" fontFamily="sans-serif" letterSpacing="1">AI</text>
       </svg>
     </div>
   );
