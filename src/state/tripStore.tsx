@@ -15,6 +15,7 @@ import {
   updatePlanDates,
   type BudgetItem,
   type ParsedTag,
+  type PlannedRoutePoint,
   type PersistedAppState,
   type TripPlan,
   type TripRequest,
@@ -106,6 +107,7 @@ type TripContextValue = TripState & {
   patchPlan: (updater: (plan: TripPlan) => TripPlan) => void;
   updatePlanSettings: (patch: Partial<TripPlan['settings']>) => void;
   updateBudgetItems: (items: BudgetItem[]) => void;
+  setBudgetTotal: (total: number) => void;
   setJournalEntries: (entries: JournalEntry[]) => void;
   resetPlan: () => void;
   notify: (message: string, tone?: ToastTone) => void;
@@ -201,10 +203,43 @@ export function TripProvider({ children }: { children: ReactNode }) {
   }, [state.plan]);
   const updatePlanSettings = useCallback((patch: Partial<TripPlan['settings']>) => patchPlan((plan) => {
     const settings = { ...plan.settings, ...patch };
-    const routePoints = calculateTimeline(plan.route.points.slice(0, settings.targetPointCount), settings.departureTime);
-    return { ...plan, settings: { ...settings, targetDurationMinutes: routePoints.reduce((sum, point) => sum + point.durationMinutes + point.travelMinutesToNext, 0) }, route: { ...plan.route, points: routePoints } };
+    let sourcePoints = plan.route.points.slice(0, settings.targetPointCount) as PlannedRoutePoint[];
+    if (patch.targetDurationMinutes !== undefined && sourcePoints.length) {
+      const travelTotal = sourcePoints.reduce((sum, point) => sum + point.travelMinutesToNext, 0);
+      const currentStayTotal = sourcePoints.reduce((sum, point) => sum + point.durationMinutes, 0);
+      const desiredStayTotal = Math.max(sourcePoints.length * 10, patch.targetDurationMinutes - travelTotal);
+      const scale = currentStayTotal > 0 ? desiredStayTotal / currentStayTotal : 1;
+      sourcePoints = sourcePoints.map((point) => {
+        const durationMinutes = Math.max(10, Math.round(point.durationMinutes * scale));
+        return { ...point, durationMinutes, stayMinutes: durationMinutes };
+      });
+    }
+    const routePoints = calculateTimeline(sourcePoints, settings.departureTime);
+    const actualDuration = routePoints.reduce((sum, point) => sum + point.durationMinutes + point.travelMinutesToNext, 0);
+    return { ...plan, settings: { ...settings, targetPointCount: routePoints.length, targetDurationMinutes: actualDuration }, route: { ...plan.route, points: routePoints } };
   }), [patchPlan]);
   const updateBudgetItems = useCallback((items: BudgetItem[]) => patchPlan((plan) => ({ ...plan, budgetItems: items, requestSnapshot: { ...plan.requestSnapshot, budget: budgetTotal(items) } })), [patchPlan]);
+  const setBudgetTotal = useCallback((value: number) => {
+    const total = Math.max(0, Math.round(Number(value) || 0));
+    const currentTotal = state.plan ? budgetTotal(state.plan.budgetItems) : 0;
+    let items = state.plan?.budgetItems ?? [];
+    if (!items.length) {
+      items = [{ id: `budget-${crypto.randomUUID()}`, item: '方案预算', amount: total, note: '' }];
+    } else if (currentTotal > 0) {
+      let assigned = 0;
+      items = items.map((item, index) => {
+        const remaining = Math.max(0, total - assigned);
+        const amount = index === items.length - 1 ? remaining : Math.min(remaining, Math.round((item.amount / currentTotal) * total));
+        assigned += amount;
+        return { ...item, amount: Math.max(0, amount) };
+      });
+    } else {
+      items = items.map((item, index) => ({ ...item, amount: index === 0 ? total : 0 }));
+    }
+    const request = { ...state.request, budget: total };
+    dispatch({ type: 'request', request });
+    if (state.plan) dispatch({ type: 'plan', plan: { ...state.plan, budgetItems: items, requestSnapshot: request, updatedAt: new Date().toISOString() } });
+  }, [state.plan, state.request]);
   const setJournalEntries = useCallback((entries: JournalEntry[]) => dispatch({ type: 'journal', entries }), []);
   const resetPlan = useCallback(() => {
     const next = defaultTripRequest();
@@ -214,7 +249,7 @@ export function TripProvider({ children }: { children: ReactNode }) {
     notify('方案已重置，真实手账和照片已保留。', 'success');
   }, [notify]);
 
-  const value = useMemo<TripContextValue>(() => ({ ...state, updateRequest, selectCity, parseText, generate, replan, setPlan, patchPlan, updatePlanSettings, updateBudgetItems, setJournalEntries, resetPlan, notify }), [generate, notify, parseText, patchPlan, replan, resetPlan, selectCity, setJournalEntries, setPlan, state, updateBudgetItems, updatePlanSettings, updateRequest]);
+  const value = useMemo<TripContextValue>(() => ({ ...state, updateRequest, selectCity, parseText, generate, replan, setPlan, patchPlan, updatePlanSettings, updateBudgetItems, setBudgetTotal, setJournalEntries, resetPlan, notify }), [generate, notify, parseText, patchPlan, replan, resetPlan, selectCity, setBudgetTotal, setJournalEntries, setPlan, state, updateBudgetItems, updatePlanSettings, updateRequest]);
 
   return <TripContext.Provider value={value}>{children}<GlobalStatus state={state} /></TripContext.Provider>;
 }
@@ -239,3 +274,4 @@ export function useTrip() {
 }
 
 export { STORAGE_KEY };
+
