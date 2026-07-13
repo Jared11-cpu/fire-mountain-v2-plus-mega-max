@@ -36,16 +36,7 @@ body {
 }
 
 .brand-mark {
-  box-shadow: 0 10px 26px rgba(14, 107, 114, .2), inset 0 0 0 1px rgba(255,255,255,.12);
-  transform: rotate(-2deg);
-}
-
-.brand-mark::after {
-  content: '';
-  position: absolute;
-  inset: 4px;
-  border: 1px solid rgba(255,255,255,.12);
-  border-radius: 27%;
+  box-shadow: 0 10px 24px rgba(18, 34, 42, .16);
 }
 
 
@@ -65,6 +56,12 @@ body {
     radial-gradient(circle at 18% 14%, rgba(47, 185, 142, .22), transparent 28%),
     radial-gradient(circle at 84% 20%, rgba(231, 91, 61, .16), transparent 30%),
     linear-gradient(135deg, #fffdf7 0%, #effaf4 56%, #f8f1df 100%);
+}
+
+.journal-notebook-lines {
+  background-color: #fffdf5;
+  background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 31px, rgba(14, 107, 114, .16) 32px);
+  background-position: 0 16px;
 }
 
 .amap-route-label {
