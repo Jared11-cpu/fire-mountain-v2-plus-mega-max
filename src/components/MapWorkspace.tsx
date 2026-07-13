@@ -30,7 +30,10 @@ export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, n
   onSimulateNavigation?: () => void;
 }) {
   const [tab, setTab] = useState<Tab>('overview');
+  const [liveDistanceKm, setLiveDistanceKm] = useState(() => estimateRouteDistance(route.points));
   const selected = route.points.find((point) => point.id === selectedPointId) ?? route.points[0];
+
+  useEffect(() => setLiveDistanceKm(estimateRouteDistance(route.points)), [route.id, route.points]);
 
   return (
     <section className="map-workspace overflow-hidden rounded-[2rem] border border-ink/10 bg-white shadow-soft">
@@ -56,10 +59,10 @@ export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, n
             <CommandButton icon={Copy} label="复制文案" onClick={onCopySocial} />
           </div>
           <div className="h-full min-w-0">
-            <RouteMap route={route} selectedPointId={selectedPointId} activePointIndex={activePointIndex} navigating={navigating} onSelectPoint={onSelectPoint} mapOnly />
+            <RouteMap route={route} selectedPointId={selectedPointId} activePointIndex={activePointIndex} navigating={navigating} onSelectPoint={onSelectPoint} onDistanceCalculated={setLiveDistanceKm} mapOnly />
           </div>
           <div className="pointer-events-none absolute bottom-5 left-5 right-5 z-20 grid gap-3 md:grid-cols-3">
-            <Metric label="路线距离" value={`${route.totalDistanceKm}km`} />
+            <Metric label="智能路线距离" value={`${liveDistanceKm.toFixed(1)}km`} />
             <Metric label="建议出发" value={route.recommendedStartTime} />
             <Metric label="到达时间" value={selected?.time ?? route.recommendedStartTime} />
           </div>
@@ -604,4 +607,51 @@ const scheduleByCity: Record<string,{rail:string[];bus:string[]}> = {
 };
 function TransportPanel({city,items}:{city:string;items:string[]}) { const schedule=scheduleByCity[city]||scheduleByCity.宜昌; return <div><SideTitle eyebrow="TRANSIT BOARD" title="交通与班次" desc="班次会临时调整，出发前务必实时复核。"/><ScheduleBlock icon={TrainFront} title="高铁 / 动车参考" items={schedule.rail}/><a href="https://kyfw.12306.cn/otn/leftTicket/init" target="_blank" rel="noreferrer" className="mb-5 flex items-center justify-center gap-2 rounded-xl bg-[#d83b32] px-4 py-3 text-sm font-black text-white">打开铁路12306实时查询<ExternalLink className="h-4 w-4"/></a><ScheduleBlock icon={Bus} title="公交 / 专线参考" items={schedule.bus}/><div className="mt-4 rounded-xl bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-900">公交发车间隔受工作日、节假日和交通状况影响；页面展示为比赛 Demo 参考，实际以当地公交 App、站牌和景区公告为准。</div><div className="mt-4"><InfoList title="换乘建议" icon={Bus} items={items}/></div></div> }
 function ScheduleBlock({icon:Icon,title,items}:{icon:typeof Bus;title:string;items:string[]}) { return <div className="mb-4 rounded-2xl border border-ink/8 bg-white p-4"><div className="mb-3 flex items-center gap-2 font-black"><Icon className="h-5 w-5 text-river"/>{title}</div><div className="space-y-2">{items.map(item=><div key={item} className="rounded-xl bg-mist px-3 py-3 text-sm font-semibold leading-6 text-ink/68">{item}</div>)}</div></div> }
-function BudgetPanel({plan}:{plan:TravelPlan}) { const total=plan.budget.reduce((sum,row)=>sum+row.amount,0); return <div><SideTitle eyebrow="TRIP COST" title="预算明细表" desc="按交通、门票、餐饮和住宿拆分。"/><div className="overflow-hidden rounded-2xl border border-ink/8 bg-white">{plan.budget.map(row=><div key={row.item} className="border-b border-ink/8 p-4 last:border-0"><div className="flex items-center justify-between"><b>{row.item}</b><span className="font-display text-xl font-black text-tower">¥{row.amount}</span></div><p className="mt-1 text-xs leading-5 text-ink/45">{row.note}</p></div>)}</div><div className="mt-4 flex items-end justify-between rounded-2xl bg-ink p-5 text-white"><div><div className="text-xs font-bold text-white/50">预计总计</div><div className="mt-1 text-sm text-white/70">建议预留 10% 机动费用</div></div><div className="font-display text-3xl font-black text-jade">¥{total}</div></div></div> }
+function BudgetPanel({ plan }: { plan: TravelPlan }) {
+  const [rows, setRows] = useState(() => plan.budget.map((row, index) => ({ ...row, id: `plan-${index}` })));
+  const [draft, setDraft] = useState({ item: '', amount: '', note: '' });
+  useEffect(() => setRows(plan.budget.map((row, index) => ({ ...row, id: `plan-${index}` }))), [plan]);
+  const total = rows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+  const addExpense = () => {
+    const item = draft.item.trim();
+    if (!item) return;
+    setRows((current) => [{ id: `custom-${Date.now()}`, item, amount: Math.max(0, Number(draft.amount) || 0), note: draft.note.trim() || '用户自定义支出' }, ...current]);
+    setDraft({ item: '', amount: '', note: '' });
+  };
+  return <div>
+    <SideTitle eyebrow="TRIP COST" title="预算明细表" desc="金额可直接修改，也可以添加自己的消费条目。" />
+    <div className="mb-4 rounded-2xl bg-ink p-4 text-white shadow-lg">
+      <div className="mb-3 flex items-center gap-2 text-sm font-black"><Plus className="h-4 w-4 text-jade" />添加我的支出</div>
+      <div className="grid grid-cols-[1fr_96px] gap-2">
+        <input value={draft.item} onChange={(event) => setDraft({ ...draft, item: event.target.value })} placeholder="条目名称" className="min-w-0 rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm outline-none placeholder:text-white/35 focus:border-jade" />
+        <div className="flex items-center rounded-xl border border-white/10 bg-white/10 px-3"><span className="text-white/45">¥</span><input type="number" min="0" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} placeholder="金额" className="w-full bg-transparent px-1 py-2 text-sm outline-none placeholder:text-white/35" /></div>
+        <input value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })} onKeyDown={(event) => event.key === 'Enter' && addExpense()} placeholder="备注（可选）" className="min-w-0 rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm outline-none placeholder:text-white/35 focus:border-jade" />
+        <button onClick={addExpense} className="rounded-xl bg-jade px-3 py-2 text-sm font-black text-ink transition hover:brightness-110">加入</button>
+      </div>
+    </div>
+    <div className="overflow-hidden rounded-2xl border border-ink/8 bg-white">
+      {rows.map((row) => <div key={row.id} className="group border-b border-ink/8 p-4 last:border-0">
+        <div className="flex items-center gap-3">
+          <input value={row.item} onChange={(event) => setRows((current) => current.map((item) => item.id === row.id ? { ...item, item: event.target.value } : item))} className="min-w-0 flex-1 bg-transparent font-black outline-none" aria-label="支出条目" />
+          <label className="flex items-center rounded-xl bg-mist px-3 text-tower"><span className="font-black">¥</span><input type="number" min="0" value={row.amount} onChange={(event) => setRows((current) => current.map((item) => item.id === row.id ? { ...item, amount: Math.max(0, Number(event.target.value) || 0) } : item))} className="w-16 bg-transparent py-2 text-right font-display text-xl font-black outline-none" aria-label={`${row.item}金额`} /></label>
+          <button onClick={() => setRows((current) => current.filter((item) => item.id !== row.id))} className="grid h-8 w-8 place-items-center rounded-full text-ink/25 transition hover:bg-tower/10 hover:text-tower" aria-label={`删除${row.item}`}><X className="h-4 w-4" /></button>
+        </div>
+        <input value={row.note} onChange={(event) => setRows((current) => current.map((item) => item.id === row.id ? { ...item, note: event.target.value } : item))} className="mt-1 w-full bg-transparent text-xs leading-5 text-ink/45 outline-none focus:text-ink/70" aria-label={`${row.item}备注`} />
+      </div>)}
+    </div>
+    <div className="mt-4 flex items-end justify-between rounded-2xl bg-ink p-5 text-white"><div><div className="text-xs font-bold text-white/50">当前总计</div><div className="mt-1 text-sm text-white/70">随你的修改实时更新</div></div><div className="font-display text-3xl font-black text-jade">¥{total}</div></div>
+  </div>;
+}
+
+function estimateRouteDistance(points: RoutePoint[]) {
+  const earthRadiusKm = 6371;
+  const radians = (value: number) => value * Math.PI / 180;
+  const directKm = points.slice(1).reduce((sum, point, index) => {
+    const previous = points[index];
+    const dLat = radians(point.lat - previous.lat);
+    const dLng = radians(point.lng - previous.lng);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(radians(previous.lat)) * Math.cos(radians(point.lat)) * Math.sin(dLng / 2) ** 2;
+    return sum + earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }, 0);
+  return Number((directKm * 1.18).toFixed(1));
+}
