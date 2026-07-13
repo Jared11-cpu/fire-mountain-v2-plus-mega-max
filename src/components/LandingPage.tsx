@@ -90,7 +90,7 @@ export function LandingPage({ onStart, onCitySelect, onFootprintDetail }: Landin
       <section className="section-pad pb-20 pt-4">
         <div className="mx-auto max-w-7xl">
           <div className="overflow-hidden rounded-[2rem] bg-ink p-7 text-white shadow-soft md:p-10">
-            <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><div className="text-xs font-black tracking-[.22em] text-jade">MY TRAVEL FOOTPRINT</div><h2 className="mt-2 font-display text-3xl font-black">我的湖北旅行足迹</h2></div><p className="text-sm text-white/45">数据来自保存在本设备的旅行手账</p></div>
+            <div><div className="text-xs font-black tracking-[.22em] text-jade">MY TRAVEL FOOTPRINT</div><h2 className="mt-2 font-display text-3xl font-black">我的湖北旅行足迹</h2></div>
             <div className="mt-7 grid grid-cols-2 divide-x divide-white/10 md:grid-cols-4">
               <Stat value={stats.places} unit="处" label="记录地点" onClick={()=>onFootprintDetail('places')} />
               <Stat value={stats.mileage} unit="km" label="累计里程" onClick={()=>onFootprintDetail('mileage')} />

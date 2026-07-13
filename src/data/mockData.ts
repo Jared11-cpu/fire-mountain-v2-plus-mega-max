@@ -75,8 +75,8 @@ export const cities: City[] = [
     title: '峡谷、溶洞与短视频大片',
     tags: ['自然风光', '土家文化', '云海'],
     image: '峡谷云阶',
-    imageUrl: 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Enshi%20grand%20canyon%202025%2010.jpg?width=1280',
-    imageCredit: { author: 'Wimwamble', license: 'CC BY-SA 4.0', sourceUrl: 'https://commons.wikimedia.org/wiki/File:Enshi_grand_canyon_2025_10.jpg' },
+    imageUrl: `${import.meta.env.BASE_URL}uploads/enshi-cover.jpg`,
+    imageCredit: { author: '项目方上传', license: '使用授权待确认', sourceUrl: `${import.meta.env.BASE_URL}uploads/enshi-cover.jpg` },
     gradient: 'from-[#1F513F] via-jade to-[#8DBB66]',
   },
   {
