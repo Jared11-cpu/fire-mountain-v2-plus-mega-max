@@ -34,6 +34,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit and component tests
+        run: pnpm test
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: HashRouter end-to-end tests
+        run: pnpm test:e2e
+
       - name: Build
         env:
           VITE_AMAP_KEY: ${{ secrets.VITE_AMAP_KEY }}

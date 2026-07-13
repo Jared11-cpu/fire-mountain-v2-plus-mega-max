@@ -38,7 +38,7 @@ export function ItineraryImageCard({ plan, route }: ItineraryImageCardProps) {
             AI ITINERARY IMAGE
           </div>
           <h3 className="mt-2 font-display text-2xl font-black text-ink">行程图片卡</h3>
-          <p className="mt-1 text-sm text-ink/55">把 AI 生成的日程、地图路线和沿途记录点压缩成一张适合路演展示/朋友圈分享的图片。</p>
+          <p className="mt-1 text-sm text-ink/55">把规则引擎生成的日程、地图路线和沿途记录点整理成一张适合路演展示/朋友圈分享的图片。</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -143,7 +143,7 @@ function buildItinerarySvg(plan: TravelPlan, route: SmartRoute) {
   <rect x="1085" y="672" width="296" height="160" rx="28" fill="#102a43" opacity="0.94" filter="url(#shadow)"/>
   <text x="1115" y="714" fill="#24a46f" font-size="15" font-weight="900" font-family="Arial, sans-serif">沿途 AI 观察</text>
   ${wrap(route.sceneryAnalysis.highlights[0] ?? route.sceneryAnalysis.socialCopy, 22).slice(0, 3).map((line, index) => `<text x="1115" y="${750 + index * 28}" fill="#fff" font-size="18" font-weight="800" font-family="Arial, sans-serif">${esc(line)}</text>`).join('')}
-  <text x="1115" y="818" fill="#b8c8d2" font-size="14" font-weight="700" font-family="Arial, sans-serif">AI 生成内容仅供旅行参考</text>
+  <text x="1115" y="818" fill="#b8c8d2" font-size="14" font-weight="700" font-family="Arial, sans-serif">规则引擎演示内容仅供旅行参考</text>
 </svg>`;
 }
 

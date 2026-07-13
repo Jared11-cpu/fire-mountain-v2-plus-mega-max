@@ -1,278 +1,103 @@
-import { useEffect, useRef, useState } from 'react';
-import { BookOpen, Camera, MapPin, Plus, Route, Trash2 } from 'lucide-react';
-import type { JournalEntry, SmartRoute } from '../types/route';
-import { clearJournal, deletePhoto, loadPhoto, readEntries, readLastRoute, savePhoto, writeEntries } from '../services/journalStorage';
+import { useEffect, useMemo, useState } from 'react';
+import { Camera, CheckCircle2, ImagePlus, Loader2, MapPin, Trash2, UploadCloud, X } from 'lucide-react';
+import { cities, type CityName } from '../data/mockData';
+import { clearJournal, compressPhoto, deletePhoto, loadPhoto, savePhoto } from '../services/journalStorage';
+import { useTrip } from '../state/tripStore';
+import type { JournalEntry } from '../types/route';
 
-type FootprintDetail = 'places' | 'mileage' | 'cities' | 'photos';
+type PendingPhoto = { id: string; file: File; preview: string; progress: number; status: 'pending' | 'compressing' | 'saved' | 'error'; error?: string };
 
-export function JournalPage({ initialFocus = null }: { initialFocus?: FootprintDetail | null }) {
-  const [entries, setEntries] = useState<JournalEntry[]>(readEntries);
-  const [plannedRoute] = useState<SmartRoute | null>(readLastRoute);
-  const [photos, setPhotos] = useState<Record<string, string>>({});
-  const [draft, setDraft] = useState({ pointName: '', note: '', city: '武汉' });
-  const [focus, setFocus] = useState<FootprintDetail | null>(initialFocus);
+export function JournalPage() {
+  const { journalEntries: entries, setJournalEntries, plan, notify } = useTrip();
+  const [mode, setMode] = useState<'real' | 'example'>('real');
+  const [draft, setDraft] = useState({ pointName: '', note: '', city: '武汉' as CityName, visitedAt: new Date().toISOString().slice(0, 10) });
+  const [pending, setPending] = useState<PendingPhoto[]>([]);
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
 
   useEffect(() => {
-    setFocus(initialFocus);
-  }, [initialFocus]);
+    let alive = true;
+    const ids = entries.flatMap((entry) => entry.photoIds);
+    Promise.all(ids.map(async (id) => [id, await loadPhoto(id)] as const)).then((rows) => {
+      if (!alive) return;
+      const next: Record<string, string> = {};
+      rows.forEach(([id, blob]) => { if (blob) next[id] = URL.createObjectURL(blob); });
+      setPhotoUrls((old) => { Object.values(old).forEach(URL.revokeObjectURL); return next; });
+    }).catch(() => notify('IndexedDB 照片读取失败，文字记录仍可使用。', 'error'));
+    return () => { alive = false; };
+  }, [entries, notify]);
 
-  useEffect(() => {
-    const urls: string[] = [];
-    Promise.all(entries.flatMap((entry) => entry.photoIds).map(async (id) => {
-      const blob = await loadPhoto(id);
-      if (blob) { const url = URL.createObjectURL(blob); urls.push(url); setPhotos((p) => ({ ...p, [id]: url })); }
-    }));
-    return () => urls.forEach(URL.revokeObjectURL);
-  }, [entries]);
+  useEffect(() => () => pending.forEach((item) => URL.revokeObjectURL(item.preview)), [pending]);
 
-  const addEntry = async (files: FileList | null) => {
-    if (!draft.pointName.trim() && !files?.length) return;
-    const photoIds = files ? await Promise.all(Array.from(files).slice(0, 6).map(savePhoto)) : [];
-    const next: JournalEntry = { id: crypto.randomUUID(), pointId: 'manual', pointName: draft.pointName || '沿途一刻', city: draft.city as JournalEntry['city'], day: 1, note: draft.note, visitedAt: new Date().toISOString(), photoIds };
-    const updated = [next, ...entries]; setEntries(updated); writeEntries(updated); setDraft({ ...draft, pointName: '', note: '' });
+  const stats = useMemo(() => ({ places: new Set(entries.map((entry) => entry.pointName)).size, cities: new Set(entries.map((entry) => entry.city)).size, photos: entries.reduce((sum, entry) => sum + entry.photoIds.length, 0) }), [entries]);
+  const examplePoints = plan?.route.points ?? [];
+
+  const chooseFiles = (files: FileList | null) => {
+    if (!files) return;
+    const selected = Array.from(files);
+    if (pending.length + selected.length > 6) { setFormError('每次最多选择 6 张图片。'); return; }
+    const tooLarge = selected.find((file) => file.size > 10 * 1024 * 1024);
+    if (tooLarge) { setFormError(`${tooLarge.name} 超过 10MB 原图上限。`); return; }
+    setPending((current) => [...current, ...selected.map((file) => ({ id: crypto.randomUUID(), file, preview: URL.createObjectURL(file), progress: 0, status: 'pending' as const }))]);
+    setFormError('');
+  };
+
+  const removePending = (id: string) => setPending((items) => { const target = items.find((item) => item.id === id); if (target) URL.revokeObjectURL(target.preview); return items.filter((item) => item.id !== id); });
+
+  const saveRecord = async () => {
+    if (!draft.pointName.trim()) { setFormError('请填写地点。'); return; }
+    if (!draft.visitedAt) { setFormError('请选择日期。'); return; }
+    if (!draft.note.trim() && pending.length === 0) { setFormError('请填写文字记录或至少选择一张照片。'); return; }
+    setSaving(true); setFormError('');
+    const savedIds: string[] = [];
+    try {
+      for (const photo of pending) {
+        setPending((items) => items.map((item) => item.id === photo.id ? { ...item, status: 'compressing', progress: 5 } : item));
+        const compressed = await compressPhoto(photo.file, (progress) => setPending((items) => items.map((item) => item.id === photo.id ? { ...item, progress } : item)));
+        if (compressed.size > 1.5 * 1024 * 1024) notify(`${photo.file.name} 压缩后仍超过建议的 1.5MB。`, 'info');
+        const photoId = await savePhoto(compressed);
+        savedIds.push(photoId);
+        setPending((items) => items.map((item) => item.id === photo.id ? { ...item, status: 'saved', progress: 100 } : item));
+      }
+      const entry: JournalEntry = { id: crypto.randomUUID(), pointId: `real-${crypto.randomUUID()}`, pointName: draft.pointName.trim(), city: draft.city, day: 1, note: draft.note.trim(), visitedAt: draft.visitedAt, photoIds: savedIds };
+      setJournalEntries([entry, ...entries]);
+      pending.forEach((item) => URL.revokeObjectURL(item.preview));
+      setPending([]); setDraft((value) => ({ ...value, pointName: '', note: '' }));
+      notify('真实足迹已保存。', 'success');
+    } catch (error) {
+      await Promise.all(savedIds.map(deletePhoto));
+      const message = `IndexedDB 保存失败：${error instanceof Error ? error.message : '未知错误'}。请检查浏览器存储权限和剩余容量。`;
+      setFormError(message); notify(message, 'error');
+    } finally { setSaving(false); }
   };
 
   const removeEntry = async (entry: JournalEntry) => {
-    await Promise.all(entry.photoIds.map(deletePhoto));
-    const updated = entries.filter((item) => item.id !== entry.id); setEntries(updated); writeEntries(updated);
+    try { await Promise.all(entry.photoIds.map(deletePhoto)); setJournalEntries(entries.filter((item) => item.id !== entry.id)); notify('记录已删除。', 'success'); }
+    catch { notify('删除照片失败，记录未更改。', 'error'); }
   };
 
-  return <main className="section-pad py-8"><div className="mx-auto max-w-7xl">
-    <section className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <div className="paper-card order-2 h-fit rounded-[1.5rem] p-5 lg:sticky lg:top-28">
-        <div className="flex items-center gap-2 font-display text-2xl font-black"><Plus className="text-tower"/>记下这一刻</div>
-        <input aria-label="地点" value={draft.pointName} onChange={(e) => setDraft({ ...draft, pointName: e.target.value })} placeholder="地点，例如：汉口江滩" className="focus-ring mt-5 w-full rounded-xl border border-ink/10 bg-white px-4 py-3" />
-        <select aria-label="城市" value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} className="mt-3 w-full rounded-xl border border-ink/10 bg-white px-4 py-3">{['武汉','宜昌','恩施','荆州','襄阳','黄石'].map((x)=><option key={x}>{x}</option>)}</select>
-        <textarea aria-label="手账文字" value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder="当时看见了什么、听见了什么？" className="focus-ring mt-3 min-h-28 w-full resize-none rounded-xl border border-ink/10 bg-white px-4 py-3" />
-        <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-ink px-4 py-3 font-black text-white"><Camera className="h-5 w-5"/>选择真实照片<input type="file" accept="image/*" multiple className="sr-only" onChange={(e) => addEntry(e.target.files)}/></label>
-        <p className="mt-3 text-xs leading-5 text-ink/45">每次最多 6 张。照片存入浏览器 IndexedDB，不会上传云端。</p>
-      </div>
-      <div className="order-1 min-w-0">
-        <JournalRouteMap entries={entries} photos={photos} plannedRoute={plannedRoute} />
-        <div className="mt-5"><FootprintDetailPanel focus={focus} entries={entries} photos={photos} onFocus={setFocus} /></div>
-        {entries.length > 0 && <div className="mt-5 space-y-5">{entries.map((entry, index)=><article key={entry.id} className="paper-card rounded-[1.5rem] p-5 md:p-7"><div className="flex items-start justify-between"><div><div className="text-xs font-black tracking-[.18em] text-tower">STOP {String(entries.length-index).padStart(2,'0')}</div><h2 className="mt-1 font-display text-3xl font-black">{entry.pointName}</h2><div className="mt-2 flex items-center gap-2 text-sm text-ink/50"><MapPin className="h-4 w-4"/>{entry.city} · {new Date(entry.visitedAt).toLocaleString('zh-CN')}</div></div><button aria-label="删除记录" onClick={()=>removeEntry(entry)} className="rounded-full p-2 text-ink/35 hover:bg-red-50 hover:text-red-600"><Trash2 className="h-5 w-5"/></button></div>{entry.photoIds.length>0&&<div className="mt-5 grid grid-cols-2 gap-2 md:grid-cols-3">{entry.photoIds.map((id)=><div key={id} className="aspect-[4/3] overflow-hidden rounded-xl bg-ink/5">{photos[id]&&<img src={photos[id]} alt={`${entry.pointName}旅行照片`} className="h-full w-full object-cover"/>}</div>)}</div>}<p className="journal-handwriting mt-5 whitespace-pre-wrap rounded-2xl bg-[#fff8d8] px-4 py-3 text-lg leading-8 text-ink/76">{entry.note||'这一站没有文字，照片已经记住了当时的光。'}</p></article>)}</div>}
-      {entries.length>0&&<button onClick={async()=>{await clearJournal(entries);setEntries([])}} className="mt-6 text-sm font-bold text-red-600">清空整本手账</button>}</div>
-    </section>
+  const clearAll = async () => {
+    if (!window.confirm('清空全部真实足迹和照片？此操作无法撤销。')) return;
+    try { await clearJournal(entries); setJournalEntries([]); notify('真实足迹已清空。', 'success'); } catch { notify('清空失败，请重试。', 'error'); }
+  };
+
+  return <main className="section-pad py-10"><div className="mx-auto max-w-7xl">
+    <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><p className="text-sm font-black uppercase tracking-[.2em] text-river">Travel Journal</p><h1 className="mt-2 font-display text-4xl font-black">示例路线 ≠ 真实足迹</h1><p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-ink/55">只有你主动保存的文字或照片才计入足迹统计；规划中的默认点位始终标注为示例路线。</p></div><div className="grid grid-cols-3 gap-2">{[['地点', stats.places], ['城市', stats.cities], ['照片', stats.photos]].map(([label, value]) => <div key={label} className="rounded-2xl bg-white px-4 py-3 text-center shadow-sm"><div className="font-display text-2xl font-black">{value}</div><div className="text-xs font-bold text-ink/45">{label}</div></div>)}</div></div>
+
+    <div className="mt-8 grid gap-6 lg:grid-cols-[.85fr_1.15fr]">
+      <section className="glass rounded-[2rem] p-5 shadow-soft"><h2 className="font-display text-2xl font-black">新增真实记录</h2><div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="地点 *" htmlFor="journal-place"><input id="journal-place" value={draft.pointName} onChange={(event) => setDraft({ ...draft, pointName: event.target.value })} className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3" /></Field><Field label="日期 *" htmlFor="journal-date"><input id="journal-date" type="date" value={draft.visitedAt} onChange={(event) => setDraft({ ...draft, visitedAt: event.target.value })} className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3" /></Field><Field label="城市" htmlFor="journal-city"><select id="journal-city" value={draft.city} onChange={(event) => setDraft({ ...draft, city: event.target.value as CityName })} className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3">{cities.map((city) => <option key={city.name}>{city.name}</option>)}</select></Field></div><Field label="文字记录（与照片至少填一项）" htmlFor="journal-note"><textarea id="journal-note" rows={4} value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })} className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3" /></Field>
+        <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-river/40 bg-white/70 px-4 py-4 font-black text-river"><ImagePlus className="h-5 w-5" />选择照片<input type="file" accept="image/*" multiple className="sr-only" onChange={(event) => { chooseFiles(event.target.files); event.currentTarget.value = ''; }} /></label><p className="mt-2 text-xs font-bold leading-5 text-ink/45">每次最多6张，原图每张≤10MB；保存前压缩至最长边1920px、WebP质量0.82，压缩后建议≤1.5MB。照片仅存本机 IndexedDB。</p>
+        {pending.length > 0 && <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">{pending.map((photo) => <div key={photo.id} className="relative overflow-hidden rounded-2xl bg-white p-2 shadow-sm"><img src={photo.preview} alt="待上传预览" className="aspect-square w-full rounded-xl object-cover" /><button type="button" aria-label="删除待上传照片" onClick={() => removePending(photo.id)} className="absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-full bg-black/65 text-white"><X className="h-4 w-4" /></button><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink/10"><div className="h-full bg-jade" style={{ width: `${photo.progress}%` }} /></div><div className="mt-1 text-[10px] font-bold text-ink/50">{photo.status === 'compressing' ? `压缩 ${photo.progress}%` : photo.status === 'saved' ? '已写入' : '等待保存'}</div></div>)}</div>}
+        {formError && <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{formError}</p>}
+        <button type="button" disabled={saving} onClick={saveRecord} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-5 py-4 font-black text-white disabled:opacity-60">{saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <UploadCloud className="h-5 w-5" />}{saving ? '保存中…' : '保存记录'}</button>
+      </section>
+
+      <section className="rounded-[2rem] bg-white p-5 shadow-soft"><div className="flex items-center justify-between gap-3"><div className="flex rounded-full bg-mist p-1" role="tablist">{(['real', 'example'] as const).map((item) => <button key={item} type="button" role="tab" aria-selected={mode === item} onClick={() => setMode(item)} className={`rounded-full px-4 py-2 text-sm font-black ${mode === item ? 'bg-ink text-white' : 'text-ink/55'}`}>{item === 'real' ? `真实足迹 ${entries.length}` : `示例路线 ${examplePoints.length}`}</button>)}</div>{entries.length > 0 && mode === 'real' && <button type="button" onClick={clearAll} className="text-xs font-black text-red-600">清空真实记录</button>}</div>
+        <div className="mt-5 space-y-4">{mode === 'real' ? entries.length ? entries.map((entry) => <article key={entry.id} className="rounded-3xl border border-ink/10 p-4"><div className="flex items-start justify-between"><div><div className="flex items-center gap-2 text-xs font-black text-jade"><CheckCircle2 className="h-4 w-4" />用户真实足迹</div><h3 className="mt-2 font-display text-2xl font-black">{entry.pointName}</h3><p className="mt-1 text-xs font-bold text-ink/45">{entry.city} · {entry.visitedAt}</p></div><button type="button" aria-label={`删除${entry.pointName}`} onClick={() => removeEntry(entry)} className="grid h-9 w-9 place-items-center rounded-full bg-red-50 text-red-600"><Trash2 className="h-4 w-4" /></button></div>{entry.note && <p className="mt-3 text-sm font-semibold leading-6 text-ink/65">{entry.note}</p>}{entry.photoIds.length > 0 && <div className="mt-3 grid grid-cols-3 gap-2">{entry.photoIds.map((id) => photoUrls[id] ? <img key={id} src={photoUrls[id]} alt={`${entry.pointName}真实记录`} className="aspect-square w-full rounded-xl object-cover" /> : <div key={id} className="grid aspect-square place-items-center rounded-xl bg-mist"><Camera className="h-5 w-5 text-ink/25" /></div>)}</div>}</article>) : <div className="grid min-h-[280px] place-items-center rounded-3xl bg-mist/50 p-8 text-center"><div><MapPin className="mx-auto h-9 w-9 text-river" /><h3 className="mt-3 font-display text-2xl font-black">0 条真实记录</h3><p className="mt-2 text-sm font-bold text-ink/45">保存第一条文字或照片后才会计入统计。</p></div></div> : examplePoints.length ? examplePoints.map((point, index) => <article key={point.id} className="rounded-3xl border border-dashed border-river/30 bg-river/5 p-4"><div className="text-xs font-black text-river">示例路线 · 不计入足迹</div><h3 className="mt-2 font-display text-xl font-black">{index + 1}. {point.name}</h3><p className="mt-1 text-xs font-bold text-ink/50">第{point.day ?? 1}天 · {point.time}</p></article>) : <p className="rounded-3xl bg-mist p-6 text-sm font-bold text-ink/50">尚未生成示例路线。</p>}</div>
+      </section>
+    </div>
   </div></main>;
 }
 
-function JournalRouteMap({ entries, photos, plannedRoute }: { entries: JournalEntry[]; photos: Record<string, string>; plannedRoute: SmartRoute | null }) {
-  const chronological = [...entries].reverse();
-  const plannedEntries = plannedRoute?.points.map((point) => {
-    const record = chronological.find((entry) => entry.pointId === point.id || entry.pointName === point.name);
-    return record ?? {
-      id: `route-${point.id}`, pointId: point.id, pointName: point.name, city: point.city, day: point.day ?? 1,
-      note: point.recordTip, visitedAt: new Date().toISOString(), lat: point.lat, lng: point.lng, photoIds: [],
-    };
-  }) ?? [];
-  const manualEntries = chronological.filter((entry) => !plannedRoute?.points.some((point) => point.id === entry.pointId || point.name === entry.pointName));
-  const points = plannedEntries.length > 0 ? [...plannedEntries, ...manualEntries] : chronological.length > 0 ? chronological : demoJournalStops;
-  const mapContainer = useRef<HTMLDivElement>(null);
-  const mapInstance = useRef<any>();
-  const [selectedId, setSelectedId] = useState(points[0]?.id ?? '');
-  const [mapStatus, setMapStatus] = useState('正在连接高德实时地图…');
-  const selected = points.find((entry) => entry.id === selectedId) ?? points[0];
-  const selectedPhotoId = selected?.photoIds?.[0];
-  const selectedPhoto = selectedPhotoId ? photos[selectedPhotoId] : '';
-  const key = import.meta.env.VITE_AMAP_KEY as string | undefined;
-  const securityCode = import.meta.env.VITE_AMAP_SECURITY_CODE as string | undefined;
-
-  useEffect(() => {
-    if (!points.some((entry) => entry.id === selectedId)) setSelectedId(points[0]?.id ?? '');
-  }, [points.map((entry) => entry.id).join('|')]);
-
-  useEffect(() => {
-    let disposed = false;
-    async function mountMap() {
-      if (!mapContainer.current || !key) {
-        setMapStatus('请配置高德 JS API Key 后显示实时地图');
-        return;
-      }
-      try {
-        if (securityCode) window._AMapSecurityConfig = { securityJsCode: securityCode };
-        if (!window.AMap) await new Promise<void>((resolve, reject) => {
-          const existing = document.querySelector<HTMLScriptElement>('script[data-amap]');
-          if (existing) {
-            if (window.AMap) resolve();
-            else {
-              existing.addEventListener('load', () => resolve(), { once: true });
-              existing.addEventListener('error', reject, { once: true });
-            }
-            return;
-          }
-          const script = document.createElement('script');
-          script.dataset.amap = 'true';
-          script.src = `https://webapi.amap.com/maps?v=2.0&key=${key}`;
-          script.onload = () => resolve();
-          script.onerror = reject;
-          document.head.appendChild(script);
-        });
-        if (disposed || !mapContainer.current || !window.AMap) return;
-        const AMap = window.AMap;
-        const coordinates = points.map((entry, index) => journalCoordinate(entry, index));
-        const map = new AMap.Map(mapContainer.current, {
-          zoom: 7,
-          center: coordinates[0],
-          viewMode: '2D',
-          resizeEnable: true,
-          mapStyle: 'amap://styles/normal',
-          features: ['bg', 'road', 'building', 'point'],
-          layers: [new AMap.TileLayer({ visible: true, zIndex: 1 })],
-        });
-        map.setFeatures?.(['bg', 'road', 'building', 'point']);
-        map.setMapStyle?.('amap://styles/normal');
-        mapInstance.current = map;
-        const line = new AMap.Polyline({
-          path: coordinates,
-          strokeColor: '#0E6B72',
-          strokeWeight: 6,
-          strokeOpacity: .88,
-          showDir: true,
-          lineJoin: 'round',
-        });
-        map.add(line);
-        const markers = points.map((entry, index) => {
-          const content = createJournalMapMarkerContent(entry, index, photos, () => setSelectedId(entry.id));
-          const marker = new AMap.Marker({
-            position: coordinates[index],
-            anchor: 'bottom-center',
-            title: entry.pointName,
-            content,
-            offset: new AMap.Pixel(index % 2 === 0 ? -10 : -150, 0),
-          });
-          marker.on('click', () => setSelectedId(entry.id));
-          map.add(marker);
-          return marker;
-        });
-        map.setFitView([line, ...markers], false, [70, 70, 70, 70]);
-        setMapStatus('高德实时地图 · 可缩放、拖动并点击记录点');
-      } catch {
-        setMapStatus('高德地图暂未加载，请检查 Key 与安全密钥');
-      }
-    }
-    mountMap();
-    return () => { disposed = true; mapInstance.current?.destroy(); mapInstance.current = undefined; };
-  }, [key, securityCode, points.map((entry) => `${entry.id}-${entry.city}`).join('|'), Object.keys(photos).join('|')]);
-
-  return (
-    <section className="journal-map journal-a4-page flex flex-col overflow-hidden rounded-[1.25rem] border border-ink/8 p-5 shadow-soft md:p-7">
-      <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-black tracking-[.2em] text-river"><Route className="h-4 w-4"/>MY ROUTE MAP</div>
-          <h2 className="journal-handwriting mt-2 text-4xl font-black text-ink">我的旅行路线手账</h2>
-        </div>
-        <p className="max-w-sm text-sm leading-6 text-ink/52">每个点位都保留照片和当时的感想，路线会随着你上传记录自动生长。</p>
-      </div>
-
-      <div className="relative mt-5 min-h-[520px] flex-1 overflow-hidden rounded-[1rem] bg-[#e5efeb]">
-        <div ref={mapContainer} className="absolute inset-0" />
-        <div className="pointer-events-none absolute left-4 top-4 rounded-full bg-white/92 px-3 py-2 text-xs font-black text-river shadow-lg backdrop-blur">{mapStatus}</div>
-      </div>
-
-      <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
-        {points.map((entry, index) => <button key={entry.id} onClick={() => setSelectedId(entry.id)} className={`shrink-0 rounded-full px-4 py-2 text-xs font-black transition ${selected?.id === entry.id ? 'bg-ink text-white' : 'bg-white text-ink/55 hover:text-ink'}`}>{index + 1} · {entry.pointName}</button>)}
-      </div>
-
-      {selected && <article className="journal-notebook-lines mt-4 grid min-h-48 overflow-hidden rounded-[1.4rem] border border-ink/10 shadow-[0_18px_45px_rgba(18,34,42,.09)] md:grid-cols-[220px_1fr]">
-        <div className="relative min-h-44 bg-ink/5">
-          {selectedPhoto ? <img src={selectedPhoto} alt={`${selected.pointName}旅行照片`} className="absolute inset-0 h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-center text-ink/28"><Camera className="mb-2 h-7 w-7"/><span className="text-xs font-black">这一站等待真实照片</span></div>}
-        </div>
-        <div className="relative px-7 py-6 md:px-9">
-          <div className="absolute bottom-0 left-4 top-0 w-px bg-tower/25" />
-          <div className="flex items-center gap-2 text-[10px] font-black tracking-[.22em] text-tower"><BookOpen className="h-4 w-4"/>TRAVEL NOTE</div>
-          <div className="journal-handwriting mt-2 flex flex-wrap items-baseline gap-x-3 text-ink"><h3 className="text-3xl font-black">{selected.pointName}</h3><span className="text-lg text-ink/45">{selected.city}</span></div>
-          <p className="journal-handwriting mt-3 whitespace-pre-wrap text-xl leading-8 text-ink/72">{selected.note || '这一站没有文字，照片已经记住了当时的光。'}</p>
-        </div>
-      </article>}
-    </section>
-  );
-}
-
-const journalCityCoordinates: Record<string, [number, number]> = {
-  武汉: [114.3055, 30.5928], 宜昌: [111.2865, 30.6919], 恩施: [109.4882, 30.2722],
-  荆州: [112.2397, 30.3352], 襄阳: [112.1224, 32.009], 黄石: [115.0389, 30.1995],
-};
-
-function journalCoordinate(entry: JournalEntry, index: number): [number, number] {
-  if (typeof entry.lng === 'number' && typeof entry.lat === 'number') return [entry.lng, entry.lat];
-  const base = journalCityCoordinates[entry.city] ?? journalCityCoordinates.武汉;
-  const offset = index * .012;
-  return [base[0] + offset, base[1] + (index % 2 ? offset : -offset)];
-}
-
-function createJournalMapMarkerContent(entry: JournalEntry, index: number, photos: Record<string, string>, onSelect: () => void) {
-  const root = document.createElement('button');
-  root.type = 'button';
-  root.className = `journal-map-pin ${index % 2 === 0 ? 'journal-map-pin-right' : 'journal-map-pin-left'}`;
-  root.setAttribute('aria-label', `${index + 1} ${entry.pointName}，查看手账`);
-  root.addEventListener('click', onSelect);
-
-  const number = document.createElement('span');
-  number.className = 'journal-map-pin-number';
-  number.textContent = String(index + 1);
-  root.appendChild(number);
-
-  const note = document.createElement('span');
-  note.className = 'journal-map-note';
-  const photoId = entry.photoIds?.[0];
-  const photo = photoId ? photos[photoId] : '';
-  if (photo) {
-    const image = document.createElement('img');
-    image.src = photo;
-    image.alt = `${entry.pointName}旅行照片`;
-    note.appendChild(image);
-  }
-  const copy = document.createElement('span');
-  copy.className = 'journal-map-note-copy';
-  const title = document.createElement('strong');
-  title.textContent = entry.pointName;
-  const text = document.createElement('em');
-  text.textContent = entry.note || '这里等你写下自己的感想。';
-  copy.append(title, text);
-  note.appendChild(copy);
-  root.appendChild(note);
-  return root;
-}
-
-const demoJournalStops: JournalEntry[] = [
-  { id: 'demo-1', pointId: 'demo-1', pointName: '出发地', city: '武汉', day: 1, note: '从这里开始写下今天的风。', visitedAt: new Date().toISOString(), photoIds: [] },
-  { id: 'demo-2', pointId: 'demo-2', pointName: '沿途风景', city: '宜昌', day: 1, note: '把窗外的山水收进口袋。', visitedAt: new Date().toISOString(), photoIds: [] },
-  { id: 'demo-3', pointId: 'demo-3', pointName: '夜景收尾', city: '宜昌', day: 1, note: '灯亮起来，路线也有了结尾。', visitedAt: new Date().toISOString(), photoIds: [] },
-];
-
-function FootprintDetailPanel({ focus, entries, photos, onFocus }: { focus: FootprintDetail | null; entries: JournalEntry[]; photos: Record<string, string>; onFocus: (focus: FootprintDetail | null) => void }) {
-  const places = [...new Set(entries.map((entry) => entry.pointName))];
-  const cities = [...new Set(entries.map((entry) => entry.city))];
-  const photoCount = entries.reduce((sum, entry) => sum + entry.photoIds.length, 0);
-  const mileage = Math.round(Math.max(0, places.length - 1) * 8.6);
-  const current = focus ?? 'places';
-
-  return (
-    <section className="paper-card rounded-[1.5rem] p-5 md:p-7">
-      <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
-        <div>
-          <div className="text-xs font-black tracking-[.18em] text-river">FOOTPRINT DETAILS</div>
-          <h2 className="mt-1 font-display text-3xl font-black">足迹详情</h2>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <DetailTab active={current === 'places'} label="地点" onClick={() => onFocus('places')} />
-          <DetailTab active={current === 'mileage'} label="里程" onClick={() => onFocus('mileage')} />
-          <DetailTab active={current === 'cities'} label="城市" onClick={() => onFocus('cities')} />
-          <DetailTab active={current === 'photos'} label="照片" onClick={() => onFocus('photos')} />
-        </div>
-      </div>
-
-      <div className="mt-5 rounded-2xl bg-mist p-4">
-        {entries.length === 0 && <p className="text-sm leading-6 text-ink/55">还没有旅行记录。上传第一张真实照片后，这里会自动生成详细足迹。</p>}
-        {entries.length > 0 && current === 'places' && <div className="flex flex-wrap gap-2">{places.map((place)=><span key={place} className="rounded-full bg-white px-3 py-2 text-sm font-black text-ink shadow-sm">{place}</span>)}</div>}
-        {entries.length > 0 && current === 'cities' && <div className="flex flex-wrap gap-2">{cities.map((city)=><span key={city} className="rounded-full bg-river/10 px-3 py-2 text-sm font-black text-river">{city}</span>)}</div>}
-        {entries.length > 0 && current === 'mileage' && <div><div className="font-display text-4xl font-black text-ink">{mileage} km</div><p className="mt-2 text-sm leading-6 text-ink/55">当前根据记录地点数量估算；接入真实 GPS 轨迹后，可替换为精确步行/驾车/公交里程。</p></div>}
-        {entries.length > 0 && current === 'photos' && <div><div className="mb-3 text-sm font-black text-ink/55">共 {photoCount} 张真实照片</div><div className="grid grid-cols-3 gap-2">{entries.flatMap((entry)=>entry.photoIds.map((id)=><div key={id} className="aspect-square overflow-hidden rounded-xl bg-white">{photos[id]&&<img src={photos[id]} alt="旅行足迹照片" className="h-full w-full object-cover"/>}</div>))}</div></div>}
-      </div>
-    </section>
-  );
-}
-
-function DetailTab({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
-  return <button onClick={onClick} className={`rounded-full px-3 py-2 text-xs font-black transition active:scale-95 ${active ? 'bg-ink text-white' : 'bg-white text-ink/55 hover:text-ink'}`}>{label}</button>;
-}
+function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) { return <div><label htmlFor={htmlFor} className="mb-2 block text-sm font-black text-ink/65">{label}</label>{children}</div>; }

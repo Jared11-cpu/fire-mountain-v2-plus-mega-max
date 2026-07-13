@@ -14,7 +14,6 @@ import {
 } from 'lucide-react';
 
 const sceneryBase = `${import.meta.env.BASE_URL}scenery/`;
-const uploadBase = `${import.meta.env.BASE_URL}uploads/`;
 
 export type CityName = '宜昌' | '武汉' | '恩施' | '荆州' | '襄阳' | '黄石';
 
@@ -76,8 +75,8 @@ export const cities: City[] = [
     title: '峡谷、溶洞与短视频大片',
     tags: ['自然风光', '土家文化', '云海'],
     image: '峡谷云阶',
-    imageUrl: `${uploadBase}enshi-cover.jpg`,
-    imageCredit: { author: '本地上传图片', license: '演示素材', sourceUrl: `${uploadBase}enshi-cover.jpg` },
+    imageUrl: 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Enshi%20grand%20canyon%202025%2010.jpg?width=1280',
+    imageCredit: { author: 'Wimwamble', license: 'CC BY-SA 4.0', sourceUrl: 'https://commons.wikimedia.org/wiki/File:Enshi_grand_canyon_2025_10.jpg' },
     gradient: 'from-[#1F513F] via-jade to-[#8DBB66]',
   },
   {
@@ -85,8 +84,8 @@ export const cities: City[] = [
     title: '古城墙与楚文化沉浸',
     tags: ['古城', '博物馆', '历史旅拍'],
     image: '楚风古城',
-    imageUrl: `${uploadBase}jingzhou-cover.jpg`,
-    imageCredit: { author: '本地上传图片', license: '演示素材', sourceUrl: `${uploadBase}jingzhou-cover.jpg` },
+    imageUrl: 'https://commons.wikimedia.org/wiki/Special:Redirect/file/%E8%8D%86%E5%B7%9E%E5%8F%A4%E5%9F%8E%E5%A2%99.jpg?width=1280',
+    imageCredit: { author: 'Kong5579', license: 'CC BY-SA 4.0', sourceUrl: 'https://commons.wikimedia.org/wiki/File:%E8%8D%86%E5%B7%9E%E5%8F%A4%E5%9F%8E%E5%A2%99.jpg' },
     gradient: 'from-[#693E2E] via-tower to-[#D8A64D]',
   },
   {
@@ -103,8 +102,8 @@ export const cities: City[] = [
     title: '矿冶工业遗产与湖山周末',
     tags: ['矿山公园', '仙岛湖', '工业风'],
     image: '矿冶湖光',
-    imageUrl: `${uploadBase}huangshi-cover.jpg`,
-    imageCredit: { author: '本地上传图片', license: '演示素材', sourceUrl: `${uploadBase}huangshi-cover.jpg` },
+    imageUrl: 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Ci%20Lake%20lights%20January%202009%20by%20Matthew%20Shaw.jpg?width=1280',
+    imageCredit: { author: 'Matthew Shaw', license: 'CC BY 2.0', sourceUrl: 'https://commons.wikimedia.org/wiki/File:Ci_Lake_lights_January_2009_by_Matthew_Shaw.jpg' },
     gradient: 'from-[#293241] via-[#587D71] to-[#D8A64D]',
   },
 ];
