@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ArrowRight, Send } from 'lucide-react';
 import { cities, type CityName } from '../data/mockData';
-import { readEntries } from '../services/journalStorage';
+import { useTrip } from '../state/tripStore';
 
 type LandingPageProps = {
   onStart: (prompt?: string) => void;
@@ -11,12 +11,12 @@ type LandingPageProps = {
 
 export function LandingPage({ onStart, onCitySelect, onFootprintDetail }: LandingPageProps) {
   const [prompt, setPrompt] = useState('');
-  const entries = useMemo(() => readEntries(), []);
+  const { journalEntries: entries } = useTrip();
   const stats = useMemo(() => {
     const places = new Set(entries.map((item) => item.pointName)).size;
     const citiesVisited = new Set(entries.map((item) => item.city)).size;
     const photos = entries.reduce((sum, item) => sum + item.photoIds.length, 0);
-    const mileage = Math.round(Math.max(0, places - 1) * 8.6);
+    const mileage = 0;
     return { places, citiesVisited, photos, mileage };
   }, [entries]);
   const submitPrompt = () => onStart(prompt.trim());
@@ -59,15 +59,12 @@ export function LandingPage({ onStart, onCitySelect, onFootprintDetail }: Landin
           </div>
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
             {cities.map((city) => (
-              <button
-                key={city.name}
-                onClick={() => onCitySelect(city.name)}
-                className="group relative min-h-[250px] overflow-hidden rounded-[1.75rem] p-5 text-left text-white shadow-soft transition hover:-translate-y-1 active:scale-[0.98]"
-              >
+              <article key={city.name} className="group relative min-h-[250px] overflow-hidden rounded-[1.75rem] text-left text-white shadow-soft transition hover:-translate-y-1">
                 <img src={city.imageUrl} alt={`${city.name}城市风景`} className="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-105" />
                 <div className="absolute inset-0 bg-gradient-to-t from-ink/90 via-ink/20 to-black/10" />
-                <a href={city.imageCredit.sourceUrl} target="_blank" rel="noreferrer" onClick={(event)=>event.stopPropagation()} className="absolute bottom-3 right-3 z-10 rounded-full bg-black/50 px-2.5 py-1 text-[9px] font-bold text-white/75">{city.imageCredit.author} · {city.imageCredit.license}</a>
-                <div className="relative flex h-full flex-col justify-between">
+                <button type="button" aria-label={`选择${city.name}并进入规划`} onClick={() => onCitySelect(city.name)} className="absolute inset-0 z-[1]" />
+                <a href={city.imageCredit.sourceUrl} target="_blank" rel="noreferrer" className="absolute bottom-3 right-3 z-10 rounded-full bg-black/50 px-2.5 py-1 text-[9px] font-bold text-white/75">{city.imageCredit.author} · {city.imageCredit.license}</a>
+                <div className="pointer-events-none relative z-[2] flex h-full flex-col justify-between p-5">
                   <div className="flex items-start justify-between">
                     <div className="rounded-full bg-white/18 px-3 py-1 text-sm font-black backdrop-blur">{city.image}</div>
                     <ArrowRight className="h-6 w-6 transition group-hover:translate-x-1" />
@@ -84,7 +81,7 @@ export function LandingPage({ onStart, onCitySelect, onFootprintDetail }: Landin
                     </div>
                   </div>
                 </div>
-              </button>
+              </article>
             ))}
           </div>
         </div>

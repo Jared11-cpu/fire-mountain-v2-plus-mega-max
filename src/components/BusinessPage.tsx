@@ -15,7 +15,7 @@ export function BusinessPage() {
 
   const generate = () => {
     setLoading(true);
-    setToast('AI 正在生成住客服务方案...');
+    setToast('规则引擎正在生成住客服务演示方案...');
     window.setTimeout(() => {
       setPlan(generateBusinessPlan(form));
       setLoading(false);

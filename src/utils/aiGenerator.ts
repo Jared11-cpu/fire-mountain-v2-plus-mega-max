@@ -165,7 +165,7 @@ export function generateTravelPlan(input: PlannerInput): TravelPlan {
       '不要把行程排满，湖北山水和城市街区都需要留出机动时间。',
       input.budget <= 300 ? '预算较紧时，优先保留交通和正餐，减少临时打卡消费。' : '舒适预算下仍建议提前锁定住宿，避免节假日涨价。',
     ],
-    socialCopy: `这次把${input.city}玩成了一个 AI 生成的旅行智能体：${input.days}天、${input.budget}元、${input.interests.join('和') || '随性'}路线，白天看${asset.culture}，晚上把本地美食和街景装进口袋。`,
+    socialCopy: `这次按规则引擎整理了一条${input.city}路线：${input.days}天、${input.budget}元、${input.interests.join('和') || '随性'}偏好，白天看${asset.culture}，晚上把本地美食和街景装进口袋。`,
     videoScript: [
       `镜头 1：用${pick(asset.photo, 0)}做开场，字幕“${input.city}${input.days}天怎么玩”。`,
       `镜头 2：快速切换${asset.places.slice(0, 3).join('、')}，每个点保留 1 秒节奏。`,

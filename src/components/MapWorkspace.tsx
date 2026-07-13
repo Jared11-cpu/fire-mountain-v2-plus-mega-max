@@ -1,657 +1,91 @@
-import { useEffect, useState } from 'react';
-import { CircleDollarSign, AlertTriangle, Bus, CalendarDays, Camera, Check, CheckCircle2, ChevronRight, CloudSun, Copy, ExternalLink, MapPin, Minus, PencilLine, Plus, RefreshCw, Sparkles, TrainFront, Umbrella, Utensils, Wind, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Bus, CalendarDays, CircleDollarSign, CloudSun, Copy, ExternalLink, Loader2, MapPin, Minus, Plus, RefreshCw, Sparkles, TrainFront, Utensils } from 'lucide-react';
 import type { TravelPlan } from '../utils/aiGenerator';
 import type { RoutePoint, SmartRoute } from '../types/route';
+import { budgetTotal, type BudgetItem, type PlannedRoutePoint } from '../domain/trip';
+import { useTrip } from '../state/tripStore';
 import { RouteMap } from './RouteMap';
-import { getPointTypeLabel } from '../services/mapService';
 
 type Tab = 'overview' | 'stops' | 'days' | 'weather' | 'transport' | 'food' | 'budget';
-
-const tabs: Array<{ id: Tab; label: string; short: string; icon: typeof MapPin }> = [
-  { id: 'overview', label: '概览', short: 'AI', icon: Sparkles },
-  { id: 'stops', label: '路线', short: '线', icon: MapPin },
-  { id: 'days', label: '行程记录', short: '记', icon: CalendarDays },
-  { id: 'weather', label: '天气', short: '天', icon: CloudSun },
-  { id: 'transport', label: '交通', short: '车', icon: Bus },
-  { id: 'food', label: '美食', short: '食', icon: Utensils },
-  { id: 'budget', label: '预算', short: '¥', icon: CircleDollarSign },
+const tabs: Array<{ id: Tab; label: string; icon: typeof MapPin }> = [
+  { id: 'overview', label: '概览', icon: Sparkles }, { id: 'stops', label: '路线', icon: MapPin },
+  { id: 'days', label: '行程记录', icon: CalendarDays }, { id: 'weather', label: '天气', icon: CloudSun },
+  { id: 'transport', label: '交通', icon: Bus }, { id: 'food', label: '美食', icon: Utensils },
+  { id: 'budget', label: '预算', icon: CircleDollarSign },
 ];
 
-export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, navigating, imageUrl, onSelectPoint, onRegenerate, onCopySocial, onSimulateNavigation }: {
-  route: SmartRoute;
-  plan: TravelPlan;
-  selectedPointId?: string;
-  activePointIndex: number;
-  navigating: boolean;
-  imageUrl: string;
-  onSelectPoint: (point: RoutePoint) => void;
-  onRegenerate?: () => void;
-  onCopySocial?: () => void;
-  onSimulateNavigation?: () => void;
+export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, navigating, onSelectPoint, onRegenerate, onCopySocial, onSimulateNavigation }: {
+  route: SmartRoute; plan: TravelPlan; selectedPointId?: string; activePointIndex: number; navigating: boolean; imageUrl: string;
+  onSelectPoint: (point: RoutePoint) => void; onRegenerate?: () => void; onCopySocial?: () => void; onSimulateNavigation?: () => void;
 }) {
+  const { plan: tripPlan, request, isReplanning, patchPlan, updatePlanSettings, updateBudgetItems } = useTrip();
   const [tab, setTab] = useState<Tab>('overview');
-  const [liveDistanceKm, setLiveDistanceKm] = useState(() => estimateRouteDistance(route.points));
-  const selected = route.points.find((point) => point.id === selectedPointId) ?? route.points[0];
+  const [mobilePane, setMobilePane] = useState<'map' | 'details'>('map');
+  const selected = route.points.find((point) => point.id === selectedPointId) as PlannedRoutePoint | undefined ?? route.points[0] as PlannedRoutePoint;
+  if (!tripPlan) return null;
 
-  useEffect(() => setLiveDistanceKm(estimateRouteDistance(route.points)), [route.id, route.points]);
+  return <section className="overflow-hidden rounded-[2rem] border border-ink/10 bg-white shadow-soft">
+    <div className="border-b border-ink/10 bg-ink p-2 lg:hidden" role="tablist" aria-label="移动端工作区">
+      <div className="grid grid-cols-2 rounded-full bg-white/10 p-1">{(['map', 'details'] as const).map((pane) => <button key={pane} type="button" role="tab" aria-selected={mobilePane === pane} onClick={() => setMobilePane(pane)} className={`rounded-full px-4 py-2 text-sm font-black ${mobilePane === pane ? 'bg-white text-ink' : 'text-white'}`}>{pane === 'map' ? '地图' : '详情'}</button>)}</div>
+    </div>
+    <div className="grid lg:min-h-[760px] lg:grid-cols-[72px_minmax(0,1fr)_420px]">
+      <nav className={`${mobilePane === 'details' ? 'flex' : 'hidden'} gap-2 overflow-x-auto bg-ink p-2 text-white lg:flex lg:flex-col lg:justify-center`} aria-label="方案详情标签">
+        {tabs.map(({ id, label, icon: Icon }) => <button key={id} type="button" aria-pressed={tab === id} aria-label={label} onClick={() => { setTab(id); setMobilePane('details'); }} className={`flex shrink-0 items-center gap-2 rounded-2xl px-3 py-2 text-xs font-black lg:flex-col lg:px-2 ${tab === id ? 'bg-river text-white' : 'text-white/65 hover:bg-white/10'}`}><Icon className="h-5 w-5" /><span>{label}</span></button>)}
+      </nav>
 
-  return (
-    <section className="map-workspace overflow-hidden rounded-[2rem] border border-ink/10 bg-white shadow-soft">
-      <div className="grid lg:h-[calc(100vh-7rem)] lg:min-h-[720px] lg:grid-cols-[68px_minmax(0,1fr)_410px]">
-        <nav className="flex gap-2 overflow-x-auto bg-ink px-2.5 py-3 text-white lg:flex-col lg:justify-center lg:overflow-visible">
-          <div className="flex gap-2 lg:flex-col">
-            {tabs.map((item) => (
-              <SidebarTab
-                key={item.id}
-                active={tab === item.id}
-                icon={item.icon}
-                short={item.short}
-                label={item.label}
-                onClick={() => setTab(item.id)}
-              />
-            ))}
-          </div>
-        </nav>
-
-        <div className="relative min-h-[68vh] min-w-0 overflow-hidden border-ink/10 lg:border-r">
-          <div className="absolute left-4 top-4 z-20 flex max-w-[calc(100%-2rem)] flex-wrap gap-2">
-            <CommandButton icon={RefreshCw} label="重新规划" onClick={onRegenerate} />
-            <CommandButton icon={Copy} label="复制文案" onClick={onCopySocial} />
-          </div>
-          <div className="h-full min-w-0">
-            <RouteMap route={route} selectedPointId={selectedPointId} activePointIndex={activePointIndex} navigating={navigating} onSelectPoint={onSelectPoint} onDistanceCalculated={setLiveDistanceKm} mapOnly />
-          </div>
-          <div className="pointer-events-none absolute bottom-5 left-5 right-5 z-20 grid gap-3 md:grid-cols-3">
-            <Metric label="智能路线距离" value={`${liveDistanceKm.toFixed(1)}km`} />
-            <Metric label="建议出发" value={route.recommendedStartTime} />
-            <Metric label="到达时间" value={selected?.time ?? route.recommendedStartTime} />
-          </div>
+      <div className={`${mobilePane === 'map' ? 'block' : 'hidden'} relative min-h-[620px] min-w-0 overflow-hidden border-ink/10 lg:block lg:border-r`}>
+        <div className="absolute left-4 top-4 z-20 flex flex-wrap gap-2">
+          <CommandButton icon={isReplanning ? Loader2 : RefreshCw} label={isReplanning ? '计算中' : '重新规划'} disabled={isReplanning} onClick={onRegenerate} spin={isReplanning} />
+          <CommandButton icon={Copy} label="复制文案" onClick={onCopySocial} />
         </div>
-
-        <aside className="flex min-h-0 min-w-0 flex-col bg-[#fffdf7]">
-          <div className="border-b border-ink/10 p-4">
-            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-river">Interactive Itinerary</div>
-            <h3 className="mt-1 font-display text-2xl font-black text-ink">{route.title}</h3>
-            <p className="mt-2 line-clamp-2 text-sm leading-6 text-ink/50">{plan.summary}</p>
-          </div>
-          <div className="sidebar-scroll min-h-0 flex-1 overflow-y-auto p-4">
-            {tab === 'overview' && <OverviewPanel route={route} plan={plan} selected={selected} />}
-            {tab === 'stops' && <StopsPanel route={route} selectedPointId={selectedPointId} imageUrl={imageUrl} onSelectPoint={onSelectPoint} />}
-            {tab === 'days' && <DailyRecordPanel route={route} plan={plan} onSelectPoint={onSelectPoint} />}
-            {tab === 'weather' && <WeatherWarningPanel route={route} />}
-            {tab === 'transport' && <TransportPanel city={route.city} items={plan.transport} />}
-            {tab === 'food' && <FoodPanel route={route} plan={plan} />}
-            {tab === 'budget' && <BudgetPanel plan={plan} />}
-          </div>
-        </aside>
+        <RouteMap route={route} selectedPointId={selectedPointId} activePointIndex={activePointIndex} navigating={navigating} onSelectPoint={onSelectPoint} mapOnly />
+        <div className="pointer-events-none absolute bottom-4 left-4 right-4 z-20 grid gap-2 sm:grid-cols-3"><Metric label="规则估算距离" value={`${route.totalDistanceKm.toFixed(1)} km`} /><Metric label="出发时间" value={tripPlan.settings.departureTime} /><Metric label="当前点到达" value={selected?.arrivalTime ?? selected?.time ?? '--:--'} /></div>
       </div>
-    </section>
-  );
-}
 
-function SidebarTab({ active, onClick, icon: Icon, short, label }: { active: boolean; onClick: () => void; icon: typeof MapPin; short: string; label: string }) {
-  return (
-    <button
-      onClick={onClick}
-      title={label}
-      className={`group relative flex h-12 min-w-12 items-center justify-center rounded-2xl text-sm font-black transition active:scale-95 lg:w-12 ${
-        active ? 'bg-river text-white shadow-[0_8px_22px_rgba(14,107,114,.35)]' : 'bg-transparent text-white/42 hover:bg-white/8 hover:text-white'
-      }`}
-    >
-      <Icon className="hidden h-5 w-5 lg:block" strokeWidth={active ? 2.5 : 1.9} />
-      <span className="lg:hidden">{short}</span>
-      <span className="sr-only">{label}</span>
-    </button>
-  );
-}
-
-function CommandButton({ icon: Icon, label, onClick, disabled = false }: { icon: typeof MapPin; label: string; onClick?: () => void; disabled?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={!onClick || disabled}
-      className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-white/92 px-4 py-2 text-sm font-black text-ink shadow-lg backdrop-blur transition hover:-translate-y-0.5 hover:bg-ink hover:text-white active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
-    >
-      <Icon className="h-4 w-4" />
-      {label}
-    </button>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl bg-white/90 p-4 shadow-lg backdrop-blur">
-      <div className="text-xs font-bold text-ink/45">{label}</div>
-      <div className="mt-1 font-display text-2xl font-black text-ink">{value}</div>
-    </div>
-  );
-}
-
-function SideTitle({eyebrow,title,desc}:{eyebrow:string;title:string;desc:string}) { return <header className="mb-4"><div className="text-[10px] font-black tracking-[.2em] text-tower">{eyebrow}</div><h3 className="mt-1 font-display text-2xl font-black">{title}</h3><p className="mt-1 text-sm text-ink/45">{desc}</p></header> }
-function InfoList({title,icon:Icon,items}:{title:string;icon:typeof MapPin;items:string[]}) { return <div><SideTitle eyebrow="LOCAL GUIDE" title={title} desc="根据路线顺序整理的实用建议。"/><div className="space-y-3">{items.map((item,index)=><div key={item} className="rounded-2xl border border-ink/8 bg-white p-4"><div className="flex items-start gap-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-river/10 text-river"><Icon className="h-4 w-4"/></span><div><div className="text-xs font-black text-tower">推荐 {String(index+1).padStart(2,'0')}</div><p className="mt-1 text-sm font-semibold leading-6 text-ink/65">{item}</p></div></div></div>)}</div></div> }
-
-function OverviewPanel({ route, plan, selected }: { route: SmartRoute; plan: TravelPlan; selected?: RoutePoint }) {
-  const [editableStats, setEditableStats] = useState(() => ({
-    points: String(route.points.length),
-    duration: route.estimatedTime,
-    budget: String(budgetTotal(plan)),
-    navigation: route.recommendedStartTime,
-  }));
-
-  useEffect(() => {
-    setEditableStats({
-      points: String(route.points.length),
-      duration: route.estimatedTime,
-      budget: String(budgetTotal(plan)),
-      navigation: route.recommendedStartTime,
-    });
-  }, [route.id, plan.title]);
-
-  return (
-    <div>
-      <SideTitle eyebrow="AI TRIP BRIEF" title="路线总览" desc="AI 给出初始建议，你可以直接修改以下内容。" />
-      <div className="grid grid-cols-2 gap-3">
-        <EditableMiniStat label="点位" value={editableStats.points} suffix="个" inputMode="numeric" onChange={(points) => setEditableStats((prev) => ({ ...prev, points }))} />
-        <EditableMiniStat label="耗时" value={editableStats.duration} onChange={(duration) => setEditableStats((prev) => ({ ...prev, duration }))} />
-        <EditableMiniStat label="预算" value={editableStats.budget} prefix="¥" inputMode="numeric" onChange={(budget) => setEditableStats((prev) => ({ ...prev, budget }))} />
-        <EditableMiniStat label="导航" value={editableStats.navigation} onChange={(navigation) => setEditableStats((prev) => ({ ...prev, navigation }))} />
-      </div>
-      {selected && (
-        <button className="mt-4 w-full rounded-2xl border border-river/20 bg-river/5 p-4 text-left">
-          <div className="text-xs font-black tracking-[0.16em] text-river">CURRENT STOP</div>
-          <h4 className="mt-2 font-display text-2xl font-black text-ink">{selected.name}</h4>
-          <p className="mt-2 text-sm leading-6 text-ink/58">{selected.reason}</p>
-        </button>
-      )}
-      <div className="mt-4 rounded-2xl bg-ink p-4 text-white">
-        <div className="text-xs font-black tracking-[0.16em] text-jade">沿途 AI 观察</div>
-        <p className="mt-2 text-sm font-semibold leading-6 text-white/78">{route.sceneryAnalysis.highlights.slice(0, 2).join('；')}</p>
-        <p className="mt-3 text-sm leading-6 text-white/58">{route.sceneryAnalysis.socialCopy}</p>
-      </div>
-    </div>
-  );
-}
-
-type PointArrangement = {
-  date: string;
-  time: string;
-  stayMinutes: number;
-  included: boolean;
-  note: string;
-};
-
-function StopsPanel({ route, selectedPointId, imageUrl, onSelectPoint }: { route: SmartRoute; selectedPointId?: string; imageUrl: string; onSelectPoint: (point: RoutePoint) => void }) {
-  const [detailPoint, setDetailPoint] = useState<RoutePoint | null>(null);
-  const [arrangements, setArrangements] = useState<Record<string, PointArrangement>>({});
-  const selectedArrangement = detailPoint ? arrangements[detailPoint.id] ?? makeDefaultArrangement(detailPoint) : null;
-
-  const openDetail = (point: RoutePoint) => {
-    onSelectPoint(point);
-    setDetailPoint(point);
-    setArrangements((prev) => prev[point.id] ? prev : { ...prev, [point.id]: makeDefaultArrangement(point) });
-  };
-
-  const updateArrangement = (point: RoutePoint, patch: Partial<PointArrangement>) => {
-    setArrangements((prev) => ({ ...prev, [point.id]: { ...(prev[point.id] ?? makeDefaultArrangement(point)), ...patch } }));
-  };
-
-  return (
-    <div>
-      <SideTitle eyebrow="ROUTE STOPS" title="沿路景点与记录点" desc="点击点位后，地图 Marker 和详情同步高亮。" />
-      <div className="space-y-3">{route.points.map((point,index)=>{
-        const arranged = arrangements[point.id]?.included;
-        return <button key={point.id} onClick={()=>openDetail(point)} className={`group w-full overflow-hidden rounded-2xl border bg-white text-left transition hover:-translate-y-0.5 hover:shadow-lg ${point.id===selectedPointId?'border-tower ring-2 ring-tower/15':'border-ink/8'}`}><div className="relative h-32 overflow-hidden bg-ink/10"><RealPlaceImage query={`${point.city} ${point.name}`} fallback={point.imageUrl||imageUrl} alt={`${point.name}真实照片`} /><div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/10"/><span className="absolute left-3 top-3 grid h-7 w-7 place-items-center rounded-full bg-tower text-xs font-black text-white">{index+1}</span>{arranged&&<span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-jade px-2 py-1 text-[10px] font-black text-ink"><Check className="h-3 w-3"/>已安排</span>}<div className="absolute bottom-3 left-3 right-3 flex items-end justify-between text-white"><div><div className="text-xs font-bold text-white/70">{point.time} · 停留 {point.stayMinutes} 分钟</div><div className="font-display text-xl font-black">{point.name}</div></div><ChevronRight className="h-5 w-5 transition group-hover:translate-x-1"/></div></div><div className="p-3"><p className="line-clamp-2 text-sm leading-6 text-ink/65">{point.reason}</p><div className="mt-2 flex items-start gap-2 text-xs font-bold leading-5 text-river"><Camera className="mt-0.5 h-3.5 w-3.5 shrink-0"/>{point.photoTip}</div><div className="mt-3 inline-flex rounded-full bg-mist px-3 py-1 text-xs font-black text-ink/55">查看详情 / 自行安排</div></div></button>;
-      })}</div>
-
-      {detailPoint && selectedArrangement && (
-        <div className="fixed inset-0 z-50 grid place-items-end bg-ink/35 p-3 backdrop-blur-sm md:place-items-center md:p-6" onClick={() => setDetailPoint(null)}>
-          <section className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-[1.5rem] bg-[#fffdf7] shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="relative h-48 overflow-hidden bg-ink/10">
-              <RealPlaceImage query={`${detailPoint.city} ${detailPoint.name}`} fallback={detailPoint.imageUrl||imageUrl} alt={`${detailPoint.name}实景详情`} />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-black/10" />
-              <button onClick={() => setDetailPoint(null)} className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-white/90 text-ink shadow-lg transition hover:bg-ink hover:text-white active:scale-95" aria-label="关闭详情">
-                <X className="h-5 w-5" />
-              </button>
-              <div className="absolute bottom-5 left-5 right-5 text-white">
-                <div className="text-xs font-black uppercase tracking-[0.18em] text-jade">{getPointTypeLabel(detailPoint.type)} · {detailPoint.city}</div>
-                <h3 className="mt-1 font-display text-3xl font-black">{detailPoint.name}</h3>
-                <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-white/80">
-                  <span className="rounded-full bg-white/18 px-3 py-1">{detailPoint.time}</span>
-                  <span className="rounded-full bg-white/18 px-3 py-1">建议 {detailPoint.stayMinutes} 分钟</span>
-                  <span className="rounded-full bg-white/18 px-3 py-1">{detailPoint.openingHours ?? '开放时间以景区公告为准'}</span>
-                </div>
-              </div>
-            </div>
-            <div className="space-y-4 p-5">
-              <div className="grid gap-3 md:grid-cols-2">
-                <DetailInfo title="地点简介" text={placeIntroduction(detailPoint)} />
-                <DetailInfo title="开放与停留" text={`${detailPoint.openingHours ?? '开放时间以场馆或景区公告为准'}；建议停留约 ${detailPoint.stayMinutes} 分钟。`} />
-                <DetailInfo title="交通与到达" text={`${transportModeLabel(detailPoint.transportMode)}；坐标 ${detailPoint.lat.toFixed(4)}, ${detailPoint.lng.toFixed(4)}。出发前建议在地图中确认实时路况与入口。`} />
-                <DetailInfo title="费用与提示" text={`参考费用约 ¥${detailPoint.estimatedCost ?? (detailPoint.type === 'food' ? 50 : 0)}。票价、预约与开放政策可能调整，请以地点官方信息为准。`} />
-              </div>
-
-              <div className="grid gap-2 sm:grid-cols-2">
-                <a href={amapPlaceUrl(detailPoint)} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-xl bg-river px-4 py-3 text-sm font-black text-white transition hover:bg-ink active:scale-95">
-                  在高德地图查看<ExternalLink className="h-4 w-4" />
-                </a>
-                <a href={placeResearchUrl(detailPoint)} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-xl border border-ink/10 bg-white px-4 py-3 text-sm font-black text-ink transition hover:border-river/25 hover:text-river active:scale-95">
-                  搜索官方与百科资料<ExternalLink className="h-4 w-4" />
-                </a>
-              </div>
-
-              <div className="rounded-2xl border border-river/15 bg-white p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-xs font-black tracking-[0.16em] text-river">MY PLAN</div>
-                    <h4 className="font-display text-xl font-black">我的自定义安排</h4>
-                  </div>
-                  <button
-                    onClick={() => updateArrangement(detailPoint, { included: !selectedArrangement.included })}
-                    className={`rounded-full px-4 py-2 text-xs font-black transition active:scale-95 ${selectedArrangement.included ? 'bg-jade text-ink' : 'bg-ink text-white'}`}
-                  >
-                    {selectedArrangement.included ? '已加入' : '加入行程'}
-                  </button>
-                </div>
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-black text-ink/45">日期</span>
-                    <input type="date" value={selectedArrangement.date} onChange={(event) => updateArrangement(detailPoint, { date: event.target.value })} className="focus-ring w-full rounded-xl border border-ink/8 bg-mist px-3 py-3 text-sm font-bold" />
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-black text-ink/45">到达时间</span>
-                    <input type="time" value={selectedArrangement.time} onChange={(event) => updateArrangement(detailPoint, { time: event.target.value })} className="focus-ring w-full rounded-xl border border-ink/8 bg-mist px-3 py-3 text-sm font-bold" />
-                  </label>
-                </div>
-                <div className="mt-3 rounded-xl bg-mist p-3">
-                  <div className="mb-2 text-xs font-black text-ink/45">停留时长</div>
-                  <div className="flex items-center justify-between">
-                    <button onClick={() => updateArrangement(detailPoint, { stayMinutes: Math.max(15, selectedArrangement.stayMinutes - 15) })} className="grid h-10 w-10 place-items-center rounded-full bg-white text-ink shadow-sm active:scale-95" aria-label="减少停留时间"><Minus className="h-4 w-4" /></button>
-                    <div className="font-display text-3xl font-black">{selectedArrangement.stayMinutes}<span className="ml-1 text-sm font-bold text-ink/45">分钟</span></div>
-                    <button onClick={() => updateArrangement(detailPoint, { stayMinutes: Math.min(240, selectedArrangement.stayMinutes + 15) })} className="grid h-10 w-10 place-items-center rounded-full bg-white text-ink shadow-sm active:scale-95" aria-label="增加停留时间"><Plus className="h-4 w-4" /></button>
-                  </div>
-                </div>
-                <label className="mt-3 block">
-                  <span className="mb-1 block text-xs font-black text-ink/45">个人备注</span>
-                  <textarea value={selectedArrangement.note} onChange={(event) => updateArrangement(detailPoint, { note: event.target.value })} placeholder="例如：想拍大坝全景、预留讲解时间、给朋友买伴手礼..." className="focus-ring min-h-24 w-full resize-none rounded-xl border border-ink/8 bg-mist px-3 py-3 text-sm leading-6" />
-                </label>
-              </div>
-            </div>
-          </section>
+      <aside className={`${mobilePane === 'details' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-col bg-[#fffdf7] lg:flex`}>
+        <div className="border-b border-ink/10 p-5"><div className="text-[10px] font-black uppercase tracking-[0.2em] text-river">RULES-V1 · SAVED PLAN</div><h3 className="mt-1 font-display text-2xl font-black">{route.title}</h3><p className="mt-2 text-sm leading-6 text-ink/55">{plan.summary}</p></div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          {tab === 'overview' && <Overview plan={tripPlan} onSettings={updatePlanSettings} />}
+          {tab === 'stops' && <Stops points={route.points as PlannedRoutePoint[]} selectedId={selectedPointId} onSelect={onSelectPoint} onPatchNote={(id, note) => patchPlan((value) => ({ ...value, pointNotes: { ...value.pointNotes, [id]: note } }))} notes={tripPlan.pointNotes} />}
+          {tab === 'days' && <Days plan={tripPlan} onPatch={patchPlan} />}
+          {tab === 'weather' && <Weather city={request.destinationCity} lat={route.points[0]?.lat} lng={route.points[0]?.lng} />}
+          {tab === 'transport' && <Transport onSimulate={onSimulateNavigation} />}
+          {tab === 'food' && <Food plan={tripPlan} />}
+          {tab === 'budget' && <Budget items={tripPlan.budgetItems} target={request.budget} onChange={updateBudgetItems} />}
         </div>
-      )}
+      </aside>
     </div>
-  );
+  </section>;
 }
 
-function makeDefaultArrangement(point: RoutePoint): PointArrangement {
-  return { date: toInputDate(new Date()), time: point.time, stayMinutes: point.stayMinutes, included: true, note: '' };
+function Overview({ plan, onSettings }: { plan: NonNullable<ReturnType<typeof useTrip>['plan']>; onSettings: ReturnType<typeof useTrip>['updatePlanSettings'] }) {
+  return <div className="space-y-4"><h4 className="font-display text-2xl font-black">路线总览</h4><div className="grid grid-cols-2 gap-3"><MetricCard label="点位" value={`${plan.route.points.length} 个`} /><MetricCard label="预计时长" value={`${Math.round(plan.settings.targetDurationMinutes / 60 * 10) / 10} 小时`} /><MetricCard label="预算总计" value={`¥${budgetTotal(plan.budgetItems)}`} /><MetricCard label="出发日期" value={plan.requestSnapshot.startDate} /></div><div className="space-y-3 rounded-3xl bg-white p-4 shadow-sm"><NumberField label="目标点位数" value={plan.settings.targetPointCount} min={2} max={plan.route.points.length} onChange={(value) => onSettings({ targetPointCount: value })} /><NumberField label="目标时长（分钟）" value={plan.settings.targetDurationMinutes} min={60} max={1440} onChange={(value) => onSettings({ targetDurationMinutes: value })} /><label className="block text-xs font-black text-ink/60">出发时间<input type="time" value={plan.settings.departureTime} onChange={(event) => onSettings({ departureTime: event.target.value })} className="focus-ring mt-2 w-full rounded-xl border border-ink/10 px-3 py-2 text-sm" /></label></div><p className="rounded-2xl bg-jade/10 p-3 text-xs font-bold leading-5 text-ink/60">时间线根据出发时间、停留时长和点间交通顺序计算；跨区路段采用单独覆写，不作为实时路况。</p></div>;
 }
 
-function DetailInfo({ title, text }: { title: string; text: string }) {
-  return (
-    <div className="rounded-2xl bg-white p-4 ring-1 ring-ink/6">
-      <div className="text-xs font-black tracking-[0.12em] text-tower">{title}</div>
-      <p className="mt-2 text-sm font-semibold leading-6 text-ink/62">{text}</p>
-    </div>
-  );
+function Stops({ points, selectedId, onSelect, notes, onPatchNote }: { points: PlannedRoutePoint[]; selectedId?: string; onSelect: (point: RoutePoint) => void; notes: Record<string, string>; onPatchNote: (id: string, note: string) => void }) {
+  return <div className="space-y-3"><h4 className="font-display text-2xl font-black">文字版真实路线</h4><p className="text-xs font-bold text-ink/50">地图不可用时，可按以下日期、到达时间和交通时长执行。</p>{points.map((point, index) => <div key={point.id} className={`rounded-3xl border p-4 ${selectedId === point.id ? 'border-river bg-river/5' : 'border-ink/10 bg-white'}`}><button type="button" onClick={() => onSelect(point)} className="w-full text-left"><div className="flex items-center justify-between"><strong>{index + 1}. {point.name}</strong><span className="rounded-full bg-ink px-2 py-1 text-xs font-black text-white">第{point.day ?? 1}天 {point.arrivalTime}</span></div><p className="mt-2 text-xs font-bold text-ink/55">停留 {point.durationMinutes} 分钟 · 前往下一站 {point.travelMinutesToNext || 0} 分钟</p></button><label className="mt-3 block text-xs font-black text-ink/55">点位备注<textarea value={notes[point.id] ?? ''} onChange={(event) => onPatchNote(point.id, event.target.value)} rows={2} className="focus-ring mt-1 w-full rounded-xl border border-ink/10 px-3 py-2 font-medium" /></label></div>)}</div>;
 }
 
-function DailyRecordPanel({ route, plan, onSelectPoint }: { route: SmartRoute; plan: TravelPlan; onSelectPoint: (point: RoutePoint) => void }) {
-  const [startDate, setStartDate] = useState(() => toInputDate(new Date()));
-  const [endDate, setEndDate] = useState(() => toInputDate(addDays(new Date(), Math.max(0, plan.days.length - 1))));
-  const [checked, setChecked] = useState<Record<string, boolean>>({});
-  const [notes, setNotes] = useState<Record<number, string>>({});
-
-  useEffect(() => {
-    setEndDate(toInputDate(addDays(parseInputDate(startDate), Math.max(0, plan.days.length - 1))));
-  }, [plan.days.length, startDate]);
-
-  const toggleItem = (key: string, place: string) => {
-    setChecked((prev) => ({ ...prev, [key]: !prev[key] }));
-    const point = route.points.find((item) => item.name.includes(place) || place.includes(item.name));
-    if (point) onSelectPoint(point);
-  };
-  const rangeText = `${formatMonthDay(startDate)} - ${formatMonthDay(endDate)}`;
-  const doneCount = Object.values(checked).filter(Boolean).length;
-  const totalItems = plan.days.reduce((sum, day) => sum + day.items.length, 0);
-
-  return (
-    <div>
-      <SideTitle eyebrow="DAY BY DAY · CHECK-IN" title="每日行程与记录" desc="时间安排、地点说明、现场打卡和当天记录集中在同一条时间线。" />
-      <div className="rounded-2xl bg-ink p-4 text-white">
-        <div className="text-xs font-black tracking-[0.18em] text-jade">TRAVEL DATE</div>
-        <div className="mt-2 font-display text-3xl font-black">{rangeText}</div>
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <DateField label="开始" value={startDate} onChange={setStartDate} />
-          <DateField label="结束" value={endDate} onChange={setEndDate} />
-        </div>
-        <div className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-sm font-bold text-white/70">{doneCount} 项已完成 · 共 {totalItems} 项行程</div>
-      </div>
-
-      <div className="mt-4 space-y-4">
-        {plan.days.map((planDay, index) => {
-          const day = index + 1;
-          const date = addDays(parseInputDate(startDate), index);
-          const dayKeys = planDay.items.map((item) => `${planDay.day}-${item.time}-${item.place}`);
-          return (
-            <section key={planDay.day} className="rounded-2xl border border-ink/8 bg-white p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs font-black text-tower">Day {day}</div>
-                  <h4 className="font-display text-xl font-black text-ink">{formatMonthDay(toInputDate(date))}</h4>
-                  <p className="mt-1 text-xs font-bold text-ink/42">{planDay.theme}</p>
-                </div>
-                <span className="rounded-full bg-river/10 px-3 py-1 text-xs font-black text-river">{dayKeys.filter((key) => checked[key]).length}/{dayKeys.length} 完成</span>
-              </div>
-              <div className="mt-3 space-y-2">
-                {planDay.items.map((item) => {
-                  const key = `${planDay.day}-${item.time}-${item.place}`;
-                  return (
-                  <button
-                    key={key}
-                    onClick={() => toggleItem(key, item.place)}
-                    className={`flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition active:scale-[0.99] ${
-                      checked[key] ? 'bg-jade/12 text-ink ring-1 ring-jade/25' : 'bg-mist text-ink/62 hover:bg-river/8'
-                    }`}
-                  >
-                    <CheckCircle2 className={`mt-0.5 h-5 w-5 shrink-0 ${checked[key] ? 'text-jade' : 'text-ink/25'}`} />
-                    <div className="min-w-0">
-                      <div className="text-sm font-black"><span className="mr-2 text-tower">{item.time}</span>{item.place}</div>
-                      <p className="mt-1 text-xs font-semibold leading-5 text-ink/48">{item.reason}</p>
-                    </div>
-                  </button>
-                );})}
-              </div>
-              <label className="mt-3 block">
-                <span className="mb-2 flex items-center gap-1 text-xs font-black text-ink/42"><PencilLine className="h-3.5 w-3.5" />今日自定义记录</span>
-                <textarea
-                  value={notes[day] ?? ''}
-                  onChange={(event) => setNotes((prev) => ({ ...prev, [day]: event.target.value }))}
-                  placeholder="写下当天最值得记录的风景、花费、心情或短视频镜头..."
-                  className="focus-ring min-h-20 w-full resize-none rounded-xl border border-ink/8 bg-[#fffdf7] px-3 py-2 text-sm leading-6"
-                />
-              </label>
-            </section>
-          );
-        })}
-      </div>
-    </div>
-  );
+function Days({ plan, onPatch }: { plan: NonNullable<ReturnType<typeof useTrip>['plan']>; onPatch: ReturnType<typeof useTrip>['patchPlan'] }) {
+  return <div className="space-y-4"><h4 className="font-display text-2xl font-black">每日记录</h4>{plan.dailyRecords.map((record) => { const points = plan.route.points.filter((point) => (point.day ?? 1) === record.day) as PlannedRoutePoint[]; return <section key={record.day} className="rounded-3xl bg-white p-4 shadow-sm"><div className="font-black">第{record.day}天 · {record.date}</div><div className="mt-3 space-y-2">{points.map((point) => <label key={point.id} className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={record.checkedPointIds.includes(point.id)} onChange={() => onPatch((value) => ({ ...value, dailyRecords: value.dailyRecords.map((item) => item.day === record.day ? { ...item, checkedPointIds: item.checkedPointIds.includes(point.id) ? item.checkedPointIds.filter((id) => id !== point.id) : [...item.checkedPointIds, point.id] } : item) }))} />{point.arrivalTime} {point.name}</label>)}</div><label className="mt-3 block text-xs font-black text-ink/55">当日备注<textarea value={record.note} onChange={(event) => onPatch((value) => ({ ...value, dailyRecords: value.dailyRecords.map((item) => item.day === record.day ? { ...item, note: event.target.value } : item) }))} rows={3} className="focus-ring mt-1 w-full rounded-xl border border-ink/10 px-3 py-2 font-medium" /></label></section>; })}</div>;
 }
 
-function DateField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return (
-    <label className="rounded-xl bg-white/10 px-3 py-2">
-      <span className="block text-[10px] font-black text-white/45">{label}</span>
-      <input type="date" value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 w-full bg-transparent text-sm font-black text-white outline-none [color-scheme:dark]" />
-    </label>
-  );
+type WeatherData = { temperature: number; code: number; fetchedAt: string; state: '实时' | '30分钟缓存' | '演示降级'; reason?: string };
+function Weather({ city, lat, lng }: { city: string; lat?: number; lng?: number }) {
+  const [weather, setWeather] = useState<WeatherData | null>(null);
+  useEffect(() => { let alive = true; const key = `weather-v1-${city}`; const cached = localStorage.getItem(key); if (cached) { try { const value = JSON.parse(cached) as WeatherData; if (Date.now() - new Date(value.fetchedAt).getTime() < 1800000) { setWeather({ ...value, state: '30分钟缓存' }); return; } } catch { /* ignore invalid cache */ } } if (!lat || !lng) { setWeather({ temperature: 24, code: 0, fetchedAt: new Date().toISOString(), state: '演示降级', reason: '路线缺少经纬度，未发起天气请求。' }); return; } fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,weather_code&timezone=Asia%2FShanghai`).then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); }).then((data) => { const value: WeatherData = { temperature: data.current.temperature_2m, code: data.current.weather_code, fetchedAt: new Date().toISOString(), state: '实时' }; localStorage.setItem(key, JSON.stringify(value)); if (alive) setWeather(value); }).catch((error) => alive && setWeather({ temperature: 24, code: 0, fetchedAt: new Date().toISOString(), state: '演示降级', reason: `Open‑Meteo 请求失败：${error instanceof Error ? error.message : '未知错误'}。显示值不可用于出行决策。` })); return () => { alive = false; }; }, [city, lat, lng]);
+  return <div className="space-y-4"><h4 className="font-display text-2xl font-black">天气透明度</h4><div className="rounded-3xl bg-river p-5 text-white"><div className="text-sm font-black">{city} · {weather?.state ?? '请求中'}</div><div className="mt-3 text-5xl font-black">{weather ? `${weather.temperature}°` : '—'}</div><div className="mt-4 space-y-1 text-xs font-bold text-white/80"><p>数据源：<a className="underline" href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open‑Meteo</a></p><p>更新时间：{weather ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'long', timeStyle: 'short', timeZone: 'Asia/Shanghai' }).format(new Date(weather.fetchedAt)) : '正在请求'}</p><p>时区：Asia/Shanghai（UTC+8）</p>{weather?.reason && <p className="mt-2 rounded-xl bg-white/15 p-2">{weather.reason}</p>}</div></div></div>;
 }
 
-type WeatherState = {
-  status: 'loading' | 'ready' | 'fallback';
-  temperature: number;
-  windSpeed: number;
-  rainProbability: number;
-  weatherCode: number;
-  updatedAt: string;
-  alerts: string[];
-};
+function Transport({ onSimulate }: { onSimulate?: () => void }) { return <div className="space-y-4"><h4 className="font-display text-2xl font-black">交通查询</h4><div className="rounded-3xl border border-tower/20 bg-tower/10 p-4 text-sm font-bold leading-6"><AlertTriangle className="mb-2 h-5 w-5 text-tower" />本页不提供实时班次。以下仅为“示例数据”，请在出发前通过官方渠道核验。</div><a href="https://www.12306.cn/" target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-2xl bg-white p-4 font-black shadow-sm"><span className="flex items-center gap-2"><TrainFront className="h-5 w-5 text-river" />铁路12306 官方查询</span><ExternalLink className="h-4 w-4" /></a><a href="https://www.amap.com/" target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-2xl bg-white p-4 font-black shadow-sm"><span className="flex items-center gap-2"><Bus className="h-5 w-5 text-river" />高德地图路线查询</span><ExternalLink className="h-4 w-4" /></a><button type="button" onClick={onSimulate} className="w-full rounded-2xl bg-ink px-4 py-3 font-black text-white">演示路线顺序</button></div>; }
 
-function WeatherWarningPanel({ route }: { route: SmartRoute }) {
-  const [weather, setWeather] = useState<WeatherState>(() => makeFallbackWeather(route.city, 'loading'));
+function Food({ plan }: { plan: NonNullable<ReturnType<typeof useTrip>['plan']> }) { return <div className="space-y-4"><h4 className="font-display text-2xl font-black">餐饮建议</h4>{plan.foodRecommendations.length ? plan.foodRecommendations.map((food) => <article key={food.id} className="rounded-3xl bg-white p-4 shadow-sm"><h5 className="font-black">{food.name}</h5><p className="mt-2 text-sm font-bold text-ink/60">{food.area} · {food.priceRange}</p><div className="mt-2 flex flex-wrap gap-1">{food.tags.map((tag) => <span key={tag} className="rounded-full bg-jade/10 px-2 py-1 text-xs font-black text-jade">{tag}</span>)}</div><p className="mt-3 text-xs font-bold text-tower">营业状态：{food.businessStatus}</p><a href={food.source.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-black text-river">来源：{food.source.name} · 核验 {food.source.checkedAt}<ExternalLink className="h-3 w-3" /></a></article>) : <p className="rounded-2xl bg-white p-4 text-sm font-bold text-ink/55">当前限制条件下没有合适条目，请放宽筛选或自行核验。</p>}</div>; }
 
-  const refreshWeather = async () => {
-    setWeather((prev) => ({ ...prev, status: 'loading' }));
-    try {
-      const point = route.startPoint ?? route.points[0];
-      const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${point.lat}&longitude=${point.lng}&current=temperature_2m,weather_code,wind_speed_10m&hourly=precipitation_probability,wind_speed_10m,weather_code&forecast_days=1&timezone=auto`);
-      if (!response.ok) throw new Error('weather request failed');
-      const data = await response.json();
-      const rainProbability = Math.max(...(data.hourly?.precipitation_probability?.slice(0, 8) ?? [0]));
-      const maxWind = Math.max(...(data.hourly?.wind_speed_10m?.slice(0, 8) ?? [data.current?.wind_speed_10m ?? 0]));
-      const temperature = Math.round(data.current?.temperature_2m ?? 24);
-      const windSpeed = Math.round(maxWind);
-      const weatherCode = Number(data.current?.weather_code ?? 0);
-      setWeather({
-        status: 'ready',
-        temperature,
-        windSpeed,
-        rainProbability,
-        weatherCode,
-        updatedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-        alerts: buildWeatherAlerts({ rainProbability, windSpeed, temperature, weatherCode }, route.city),
-      });
-    } catch {
-      setWeather(makeFallbackWeather(route.city, 'fallback'));
-    }
-  };
-
-  useEffect(() => {
-    refreshWeather();
-    const timer = window.setInterval(refreshWeather, 10 * 60 * 1000);
-    return () => window.clearInterval(timer);
-  }, [route.id]);
-
-  const level = weather.alerts.length > 1 ? '注意' : weather.rainProbability >= 50 || weather.windSpeed >= 30 ? '关注' : '适宜';
-
-  return (
-    <div>
-      <SideTitle eyebrow="LIVE WEATHER" title="天气预警" desc="根据路线起点实时更新，自动给出拍照、出行和安全建议。" />
-      <div className="rounded-2xl bg-ink p-4 text-white">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-xs font-black tracking-[0.18em] text-jade">{route.city} · {weather.status === 'loading' ? '更新中' : `更新 ${weather.updatedAt}`}</div>
-            <div className="mt-2 font-display text-5xl font-black">{weather.temperature}°C</div>
-            <div className="mt-1 text-sm font-bold text-white/60">{weatherText(weather.weatherCode)} · 风速 {weather.windSpeed} km/h</div>
-          </div>
-          <span className={`rounded-full px-3 py-2 text-xs font-black ${level === '适宜' ? 'bg-jade text-ink' : 'bg-tower text-white'}`}>{level}</span>
-        </div>
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <WeatherMetric icon={Umbrella} label="降雨概率" value={`${weather.rainProbability}%`} />
-          <WeatherMetric icon={Wind} label="最大风速" value={`${weather.windSpeed} km/h`} />
-        </div>
-      </div>
-      <div className="mt-4 space-y-3">
-        {weather.alerts.map((alert) => (
-          <div key={alert} className="rounded-2xl border border-ink/8 bg-white p-4">
-            <div className="flex items-start gap-3">
-              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-tower/10 text-tower"><AlertTriangle className="h-4 w-4" /></span>
-              <p className="text-sm font-semibold leading-6 text-ink/68">{alert}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-      <button onClick={refreshWeather} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-river px-4 py-3 text-sm font-black text-white transition hover:bg-ink active:scale-95">
-        <RefreshCw className="h-4 w-4" />
-        立即刷新天气
-      </button>
-    </div>
-  );
+function Budget({ items, target, onChange }: { items: BudgetItem[]; target: number; onChange: (items: BudgetItem[]) => void }) {
+  const total = budgetTotal(items); return <div className="space-y-4"><div className="flex items-end justify-between"><div><h4 className="font-display text-2xl font-black">预算明细</h4><p className="text-xs font-bold text-ink/50">统一状态自动保存</p></div><strong className={total > target ? 'text-red-600' : 'text-jade'}>¥{total} / ¥{target}</strong></div>{items.map((item) => <div key={item.id} className="grid grid-cols-[1fr_88px_36px] gap-2 rounded-2xl bg-white p-3 shadow-sm"><label className="text-xs font-black text-ink/55">项目<input value={item.item} onChange={(event) => onChange(items.map((value) => value.id === item.id ? { ...value, item: event.target.value } : value))} className="focus-ring mt-1 w-full rounded-lg border border-ink/10 px-2 py-2 text-sm text-ink" /></label><label className="text-xs font-black text-ink/55">金额<input type="number" min={0} value={item.amount} onChange={(event) => onChange(items.map((value) => value.id === item.id ? { ...value, amount: Number(event.target.value) } : value))} className="focus-ring mt-1 w-full rounded-lg border border-ink/10 px-2 py-2 text-sm text-ink" /></label><button type="button" aria-label={`删除${item.item}`} onClick={() => onChange(items.filter((value) => value.id !== item.id))} className="mt-5 grid h-9 place-items-center rounded-lg bg-red-50 text-red-600"><Minus className="h-4 w-4" /></button></div>)}<button type="button" onClick={() => onChange([...items, { id: `budget-${crypto.randomUUID()}`, item: '新条目', amount: 0, note: '' }])} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-river/40 px-4 py-3 font-black text-river"><Plus className="h-4 w-4" />新增预算条目</button></div>;
 }
 
-function WeatherMetric({ icon: Icon, label, value }: { icon: typeof CloudSun; label: string; value: string }) {
-  return <div className="rounded-xl bg-white/10 p-3"><Icon className="h-4 w-4 text-jade" /><div className="mt-2 text-xs text-white/45">{label}</div><div className="font-display text-xl font-black">{value}</div></div>;
-}
-
-function makeFallbackWeather(city: string, status: WeatherState['status']): WeatherState {
-  const presets: Record<string, { temperature: number; windSpeed: number; rainProbability: number; weatherCode: number }> = {
-    宜昌: { temperature: 29, windSpeed: 14, rainProbability: 35, weatherCode: 2 },
-    武汉: { temperature: 31, windSpeed: 12, rainProbability: 28, weatherCode: 1 },
-    恩施: { temperature: 24, windSpeed: 10, rainProbability: 48, weatherCode: 3 },
-    荆州: { temperature: 30, windSpeed: 16, rainProbability: 32, weatherCode: 2 },
-    襄阳: { temperature: 29, windSpeed: 18, rainProbability: 25, weatherCode: 1 },
-    黄石: { temperature: 30, windSpeed: 13, rainProbability: 30, weatherCode: 2 },
-  };
-  const preset = presets[city] ?? presets.宜昌;
-  return {
-    status,
-    ...preset,
-    updatedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-    alerts: buildWeatherAlerts(preset, city),
-  };
-}
-
-function buildWeatherAlerts(weather: { rainProbability: number; windSpeed: number; temperature: number; weatherCode: number }, city: string) {
-  const alerts = [];
-  if (weather.rainProbability >= 60 || [61, 63, 65, 80, 81, 82, 95].includes(weather.weatherCode)) {
-    alerts.push(`${city}未来数小时有明显降雨风险，建议把峡谷、江滩、古城墙等户外点位前移，带伞并避开湿滑台阶。`);
-  } else if (weather.rainProbability >= 35) {
-    alerts.push(`${city}有阵雨可能，拍照点建议优先安排在上午或雨停后，保留室内博物馆/咖啡店备选。`);
-  } else {
-    alerts.push(`${city}当前天气总体适宜出行，户外路线可正常推进，傍晚适合拍江景和城市灯光。`);
-  }
-  if (weather.windSpeed >= 30) {
-    alerts.push('风速偏高，江边、山顶和观景平台拍摄时注意固定手机和三脚架，避免临水边缘停留过久。');
-  }
-  if (weather.temperature >= 33) {
-    alerts.push('体感温度偏高，建议避开 12:00-15:00 暴晒时段，把美食、交通换乘和室内讲解放到中午。');
-  }
-  return alerts;
-}
-
-function weatherText(code: number) {
-  if ([0].includes(code)) return '晴';
-  if ([1, 2].includes(code)) return '多云';
-  if ([3, 45, 48].includes(code)) return '阴/雾';
-  if ([51, 53, 55, 61, 63, 65, 80, 81, 82].includes(code)) return '降雨';
-  if ([95, 96, 99].includes(code)) return '雷雨';
-  return '实时天气';
-}
-
-function FoodPanel({ route, plan }: { route: SmartRoute; plan: TravelPlan }) {
-  const foodStops = route.points.filter((point) => point.type === 'food');
-  const foodItems = foodStops.length > 0
-    ? foodStops.map((point) => `${point.name}：${point.time} 到达，建议停留 ${point.stayMinutes} 分钟。${point.reason}`)
-    : plan.food;
-  return <InfoList title="美食店铺推荐" icon={Utensils} items={foodItems} />;
-}
-
-function EditableMiniStat({ label, value, onChange, prefix = '', suffix = '', inputMode = 'text' }: { label: string; value: string; onChange: (value: string) => void; prefix?: string; suffix?: string; inputMode?: 'text' | 'numeric' }) {
-  return (
-    <label className="rounded-2xl border border-ink/8 bg-white p-4 transition focus-within:border-river/30 focus-within:ring-4 focus-within:ring-river/8">
-      <span className="text-xs font-bold text-ink/42">{label} · 可修改</span>
-      <span className="mt-2 flex items-baseline gap-1 font-display text-xl font-black text-ink">
-        {prefix && <span>{prefix}</span>}
-        <input aria-label={`修改${label}`} inputMode={inputMode} value={value} onChange={(event) => onChange(event.target.value)} className="min-w-0 w-full bg-transparent font-display text-xl font-black text-ink outline-none" />
-        {suffix && <span className="shrink-0 text-sm text-ink/45">{suffix}</span>}
-      </span>
-    </label>
-  );
-}
-
-function RealPlaceImage({query,fallback,alt}:{query:string;fallback:string;alt:string}) {
-  const [photo,setPhoto]=useState<{url:string;page:string;credit:string}>({url:fallback,page:'',credit:'正在查找实景照片…'});
-  useEffect(()=>{let active=true; const url=`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrnamespace=6&gsrlimit=1&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=900&format=json&origin=*`; fetch(url).then(r=>r.json()).then(data=>{const page=Object.values(data.query?.pages||{})[0] as any; const info=page?.imageinfo?.[0]; if(active&&info?.thumburl) setPhoto({url:info.thumburl,page:`https://commons.wikimedia.org/?curid=${page.pageid}`,credit:'Wikimedia Commons'});}).catch(()=>{}); return()=>{active=false}},[query,fallback]);
-  return <><img src={photo.url} alt={alt} onError={(e)=>{e.currentTarget.src=fallback}} className="h-full w-full object-cover transition duration-500 group-hover:scale-105"/>{photo.page&&<a href={photo.page} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} className="absolute right-2 top-2 z-10 rounded-full bg-black/55 px-2 py-1 text-[9px] font-bold text-white/80">{photo.credit}</a>}</>;
-}
-
-function budgetTotal(plan: TravelPlan) {
-  return plan.budget.reduce((sum, row) => sum + row.amount, 0);
-}
-
-function placeIntroduction(point: RoutePoint) {
-  if (point.type === 'start' || point.type === 'end') {
-    return `${point.name}是本次${point.city}行程的交通衔接点，可用于确认集合、换乘和返程安排。`;
-  }
-  const reason = /Mock|演示路线/.test(point.reason) ? '' : point.reason;
-  return reason || `${point.name}位于${point.city}，属于本次路线中的${getPointTypeLabel(point.type)}点位，可结合现场导览了解其历史、景观与游览信息。`;
-}
-
-function transportModeLabel(mode?: RoutePoint['transportMode']) {
-  if (mode === 'walk') return '建议步行到达或衔接周边公共交通';
-  if (mode === 'transit') return '建议优先查询实时公交或轨道交通';
-  if (mode === 'drive') return '建议驾车前确认停车场、入口与实时路况';
-  return '建议使用高德地图查询当前出发地到该地点的实时路线';
-}
-
-function amapPlaceUrl(point: RoutePoint) {
-  const params = new URLSearchParams({ keyword: `${point.city} ${point.name}`, city: point.city, view: 'map', src: 'chuyou-ai', callnative: '0' });
-  return `https://uri.amap.com/search?${params.toString()}`;
-}
-
-function placeResearchUrl(point: RoutePoint) {
-  return `https://www.baidu.com/s?wd=${encodeURIComponent(`${point.city} ${point.name} 官方 介绍`)}`;
-}
-
-function toInputDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function parseInputDate(value: string) {
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? new Date() : date;
-}
-
-function addDays(date: Date, days: number) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
-function formatMonthDay(value: string) {
-  const date = parseInputDate(value);
-  return `${date.getMonth() + 1}月${date.getDate()}号`;
-}
-
-const scheduleByCity: Record<string,{rail:string[];bus:string[]}> = {
-  宜昌:{rail:['D2234 宜昌东 13:05 → 武汉 15:36（约2小时31分）','D2248 宜昌东 13:10 → 汉口 15:05（约1小时55分）'],bus:['B1路 宜昌东站 → 山庄路：约06:00–22:30，高峰约5–8分钟/班','B9路 宜昌东站 → 葛洲坝方向：约06:20–21:30，约10–15分钟/班','三峡游客中心旅游专线：按景区预约班次发车，建议提前30分钟到站']},
-  武汉:{rail:['G/动车 武汉站 → 宜昌东：全天约61个可选车次，常见耗时约2小时','城际/动车 汉口站 → 荆州站：早中晚均有班次，常见耗时约1.5小时'],bus:['地铁4号线 武汉站 → 复兴路：约06:00–23:00，高峰约3–6分钟/班','公交402路串联东湖、江汉关等区域：约06:00–20:30，约10–15分钟/班','轮渡中华路码头 → 武汉关码头：白天约20–30分钟/班']},
-  恩施:{rail:['D字头 武汉/汉口 → 恩施：每日多班，常见耗时约4小时','恩施站返汉口：建议优先选择17:00前车次，预留景区返程时间'],bus:['恩施站 → 女儿城公交：白天约10–20分钟/班','恩施汽车客运中心 → 大峡谷旅游专线：通常上午集中发班，返程以景区公告为准']},
-  荆州:{rail:['D字头 汉口 → 荆州：每日多班，常见耗时约1.5小时','荆州站 → 宜昌东：动车班次密集，常见耗时约40–60分钟'],bus:['公交21路 荆州站 → 古城/博物馆方向：约10–15分钟/班','古城旅游公交：节假日可能加密班次，以站牌为准']},
-  襄阳:{rail:['G/动车 武汉 → 襄阳东：每日多班，常见耗时约2小时','襄阳东 → 汉口：早中晚均有班次'],bus:['G02高铁公交 襄阳东站 → 市区：高铁到站时段滚动发车','古城 → 唐城公交：约10–20分钟/班，夜场结束前确认末班车']},
-  黄石:{rail:['城际/高铁 武汉 → 黄石北：每日多班，常见耗时约30–50分钟','黄石北 → 武汉：晚间仍有部分班次，具体以12306为准'],bus:['公交37路 黄石北站 → 市区方向：约10–15分钟/班','磁湖景区周边公交：白天约10–20分钟/班']},
-};
-function TransportPanel({city,items}:{city:string;items:string[]}) { const schedule=scheduleByCity[city]||scheduleByCity.宜昌; return <div><SideTitle eyebrow="TRANSIT BOARD" title="交通与班次" desc="班次会临时调整，出发前务必实时复核。"/><ScheduleBlock icon={TrainFront} title="高铁 / 动车参考" items={schedule.rail}/><a href="https://kyfw.12306.cn/otn/leftTicket/init" target="_blank" rel="noreferrer" className="mb-5 flex items-center justify-center gap-2 rounded-xl bg-[#d83b32] px-4 py-3 text-sm font-black text-white">打开铁路12306实时查询<ExternalLink className="h-4 w-4"/></a><ScheduleBlock icon={Bus} title="公交 / 专线参考" items={schedule.bus}/><div className="mt-4 rounded-xl bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-900">公交发车间隔受工作日、节假日和交通状况影响；页面展示为比赛 Demo 参考，实际以当地公交 App、站牌和景区公告为准。</div><div className="mt-4"><InfoList title="换乘建议" icon={Bus} items={items}/></div></div> }
-function ScheduleBlock({icon:Icon,title,items}:{icon:typeof Bus;title:string;items:string[]}) { return <div className="mb-4 rounded-2xl border border-ink/8 bg-white p-4"><div className="mb-3 flex items-center gap-2 font-black"><Icon className="h-5 w-5 text-river"/>{title}</div><div className="space-y-2">{items.map(item=><div key={item} className="rounded-xl bg-mist px-3 py-3 text-sm font-semibold leading-6 text-ink/68">{item}</div>)}</div></div> }
-function BudgetPanel({ plan }: { plan: TravelPlan }) {
-  const [rows, setRows] = useState(() => plan.budget.map((row, index) => ({ ...row, id: `plan-${index}` })));
-  const [draft, setDraft] = useState({ item: '', amount: '', note: '' });
-  useEffect(() => setRows(plan.budget.map((row, index) => ({ ...row, id: `plan-${index}` }))), [plan]);
-  const total = rows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
-  const addExpense = () => {
-    const item = draft.item.trim();
-    if (!item) return;
-    setRows((current) => [{ id: `custom-${Date.now()}`, item, amount: Math.max(0, Number(draft.amount) || 0), note: draft.note.trim() || '用户自定义支出' }, ...current]);
-    setDraft({ item: '', amount: '', note: '' });
-  };
-  return <div>
-    <SideTitle eyebrow="TRIP COST" title="预算明细表" desc="金额可直接修改，也可以添加自己的消费条目。" />
-    <div className="mb-4 rounded-2xl bg-ink p-4 text-white shadow-lg">
-      <div className="mb-3 flex items-center gap-2 text-sm font-black"><Plus className="h-4 w-4 text-jade" />添加我的支出</div>
-      <div className="grid grid-cols-[1fr_96px] gap-2">
-        <input value={draft.item} onChange={(event) => setDraft({ ...draft, item: event.target.value })} placeholder="条目名称" className="min-w-0 rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm outline-none placeholder:text-white/35 focus:border-jade" />
-        <div className="flex items-center rounded-xl border border-white/10 bg-white/10 px-3"><span className="text-white/45">¥</span><input type="number" min="0" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: event.target.value })} placeholder="金额" className="w-full bg-transparent px-1 py-2 text-sm outline-none placeholder:text-white/35" /></div>
-        <input value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })} onKeyDown={(event) => event.key === 'Enter' && addExpense()} placeholder="备注（可选）" className="min-w-0 rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm outline-none placeholder:text-white/35 focus:border-jade" />
-        <button onClick={addExpense} className="rounded-xl bg-jade px-3 py-2 text-sm font-black text-ink transition hover:brightness-110">加入</button>
-      </div>
-    </div>
-    <div className="overflow-hidden rounded-2xl border border-ink/8 bg-white">
-      {rows.map((row) => <div key={row.id} className="group border-b border-ink/8 p-4 last:border-0">
-        <div className="flex items-center gap-3">
-          <input value={row.item} onChange={(event) => setRows((current) => current.map((item) => item.id === row.id ? { ...item, item: event.target.value } : item))} className="min-w-0 flex-1 bg-transparent font-black outline-none" aria-label="支出条目" />
-          <label className="flex items-center rounded-xl bg-mist px-3 text-tower"><span className="font-black">¥</span><input type="number" min="0" value={row.amount} onChange={(event) => setRows((current) => current.map((item) => item.id === row.id ? { ...item, amount: Math.max(0, Number(event.target.value) || 0) } : item))} className="w-16 bg-transparent py-2 text-right font-display text-xl font-black outline-none" aria-label={`${row.item}金额`} /></label>
-          <button onClick={() => setRows((current) => current.filter((item) => item.id !== row.id))} className="grid h-8 w-8 place-items-center rounded-full text-ink/25 transition hover:bg-tower/10 hover:text-tower" aria-label={`删除${row.item}`}><X className="h-4 w-4" /></button>
-        </div>
-        <input value={row.note} onChange={(event) => setRows((current) => current.map((item) => item.id === row.id ? { ...item, note: event.target.value } : item))} className="mt-1 w-full bg-transparent text-xs leading-5 text-ink/45 outline-none focus:text-ink/70" aria-label={`${row.item}备注`} />
-      </div>)}
-    </div>
-    <div className="mt-4 flex items-end justify-between rounded-2xl bg-ink p-5 text-white"><div><div className="text-xs font-bold text-white/50">当前总计</div><div className="mt-1 text-sm text-white/70">随你的修改实时更新</div></div><div className="font-display text-3xl font-black text-jade">¥{total}</div></div>
-  </div>;
-}
-
-function estimateRouteDistance(points: RoutePoint[]) {
-  const earthRadiusKm = 6371;
-  const radians = (value: number) => value * Math.PI / 180;
-  const directKm = points.slice(1).reduce((sum, point, index) => {
-    const previous = points[index];
-    const dLat = radians(point.lat - previous.lat);
-    const dLng = radians(point.lng - previous.lng);
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(radians(previous.lat)) * Math.cos(radians(point.lat)) * Math.sin(dLng / 2) ** 2;
-    return sum + earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }, 0);
-  return Number((directKm * 1.18).toFixed(1));
-}
+function CommandButton({ icon: Icon, label, onClick, disabled, spin }: { icon: typeof RefreshCw; label: string; onClick?: () => void; disabled?: boolean; spin?: boolean }) { return <button type="button" aria-label={label} disabled={disabled} onClick={onClick} className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-white/90 px-4 py-2 text-xs font-black text-ink shadow-soft backdrop-blur disabled:opacity-60"><Icon className={`h-4 w-4 ${spin ? 'animate-spin' : ''}`} />{label}</button>; }
+function Metric({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl bg-ink/88 p-3 text-white shadow-soft backdrop-blur"><div className="text-[10px] font-black uppercase tracking-wider text-white/55">{label}</div><div className="mt-1 font-black">{value}</div></div>; }
+function MetricCard({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl bg-white p-4 shadow-sm"><div className="text-xs font-black text-ink/50">{label}</div><div className="mt-1 font-display text-xl font-black">{value}</div></div>; }
+function NumberField({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) { return <label className="block text-xs font-black text-ink/60">{label}<input type="number" min={min} max={max} value={value} onChange={(event) => onChange(Math.min(max, Math.max(min, Number(event.target.value) || min)))} className="focus-ring mt-2 w-full rounded-xl border border-ink/10 px-3 py-2 text-sm" /></label>; }

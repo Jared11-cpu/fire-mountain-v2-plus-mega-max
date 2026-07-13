@@ -14,7 +14,7 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-export async function savePhoto(file: File) {
+export async function savePhoto(file: Blob) {
   const id = `${Date.now()}-${crypto.randomUUID()}`;
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
@@ -25,6 +25,26 @@ export async function savePhoto(file: File) {
   });
   db.close();
   return id;
+}
+
+export async function compressPhoto(file: File, onProgress?: (progress: number) => void): Promise<Blob> {
+  if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name} 超过 10MB 原图上限。`);
+  onProgress?.(10);
+  const bitmap = await createImageBitmap(file);
+  onProgress?.(35);
+  const scale = Math.min(1, 1920 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('浏览器无法创建图片压缩画布。');
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  onProgress?.(70);
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.82));
+  if (!blob) throw new Error('图片压缩失败。');
+  onProgress?.(100);
+  return blob;
 }
 
 export async function loadPhoto(id: string) {

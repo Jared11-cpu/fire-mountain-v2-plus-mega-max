@@ -1,406 +1,113 @@
-import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Check, LocateFixed, Loader2, Sparkles } from 'lucide-react';
-import { budgetOptions, cities, dayOptions, examples, groupOptions, interestOptions, type CityName } from '../data/mockData';
-import { generateTravelPlan, type PlannerInput, type TravelPlan } from '../utils/aiGenerator';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Check, Copy, LocateFixed, Loader2, RotateCcw, Sparkles } from 'lucide-react';
+import { cities, examples } from '../data/mockData';
+import { DIETARY_RESTRICTIONS, encodeSharePlan, INTERESTS, SPECIAL_NEEDS, TRAVELERS, type DietaryRestriction, type Interest, type SpecialNeed, type TravelerType } from '../domain/trip';
+import { getBrowserLocation } from '../services/locationService';
+import type { RoutePoint } from '../types/route';
+import { useTrip } from '../state/tripStore';
 import { MapWorkspace } from './MapWorkspace';
-import { generateSmartRoute } from '../services/mapService';
-import { getBrowserLocation, makeMockLocation, mockLocationOptions } from '../services/locationService';
-import type { RoutePoint, SmartRoute, UserLocation } from '../types/route';
-import { writeLastRoute } from '../services/journalStorage';
 
-type PlannerPageProps = {
-  initialCity: CityName;
-  initialPrompt?: string;
-};
-
-export function PlannerPage({ initialCity, initialPrompt = '' }: PlannerPageProps) {
-  const [form, setForm] = useState<PlannerInput>({
-    city: initialCity,
-    days: 2,
-    budget: 600,
-    interests: ['拍照', '美食'],
-    group: '朋友',
-    prompt: initialPrompt || '我想去宜昌两天一夜，预算 600，喜欢拍照和美食。',
-  });
-  const [loading, setLoading] = useState(false);
+export function PlannerPage() {
+  const { request, plan, parsedTags, parseWarnings, isReplanning, replanSummary, updateRequest, parseText, generate, replan, resetPlan, notify } = useTrip();
+  const [resultMode, setResultMode] = useState(Boolean(plan));
+  const [selectedPointId, setSelectedPointId] = useState<string | undefined>(plan?.route.points[0]?.id);
   const [locating, setLocating] = useState(false);
-  const [location, setLocation] = useState<UserLocation>(() => makeMockLocation(initialCity));
-  const [plan, setPlan] = useState<TravelPlan>(() => generateTravelPlan({
-    city: initialCity,
-    days: 2,
-    budget: 600,
-    interests: ['拍照', '美食'],
-    group: '朋友',
-    prompt: '我想去宜昌两天一夜，预算 600，喜欢拍照和美食。',
-  }));
-  const [smartRoute, setSmartRoute] = useState<SmartRoute>(() => generateSmartRoute({
-    city: initialCity,
-    days: 2,
-    budget: 600,
-    interests: ['拍照', '美食'],
-    group: '朋友',
-    prompt: '我想去宜昌两天一夜，预算 600，喜欢拍照和美食。',
-  }, makeMockLocation(initialCity)));
-  const [selectedPointId, setSelectedPointId] = useState<string>();
-  const [resultMode, setResultMode] = useState(false);
-  const [navigating, setNavigating] = useState(false);
-  const [activePointIndex, setActivePointIndex] = useState(0);
-  const [, setToast] = useState('');
   const resultRef = useRef<HTMLDivElement>(null);
-  const navigationTimerRef = useRef<number>();
-  const selectedCity = cities.find((city) => city.name === form.city) ?? cities[0];
+  const selectedCity = useMemo(() => cities.find((city) => city.name === request.destinationCity) ?? cities[0], [request.destinationCity]);
 
-  useEffect(() => {
-    return () => {
-      if (navigationTimerRef.current) {
-        window.clearInterval(navigationTimerRef.current);
-      }
-    };
-  }, []);
+  useEffect(() => { if (plan) setResultMode(true); }, [plan]);
 
-  useEffect(() => {
-    writeLastRoute(smartRoute);
-  }, [smartRoute]);
-
-  const toggleInterest = (item: string) => {
-    setForm((prev) => ({
-      ...prev,
-      interests: prev.interests.includes(item) ? prev.interests.filter((i) => i !== item) : [...prev.interests, item],
-    }));
+  const createPlan = () => {
+    const next = generate();
+    setSelectedPointId(next.route.points[0]?.id);
+    setResultMode(true);
+    window.setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
   };
 
-  const generate = () => {
-    setLoading(true);
-    setToast('AI 正在理解需求、拆解路线、生成地图和沿途观察...');
-    window.setTimeout(() => {
-      const nextPlan = generateTravelPlan(form);
-      const nextRoute = generateSmartRoute(form, location.city === form.city ? location : makeMockLocation(form.city));
-      setPlan(nextPlan);
-      setSmartRoute(nextRoute);
-      setSelectedPointId(nextRoute.points[0]?.id);
-      setActivePointIndex(0);
-      setNavigating(false);
-      setResultMode(true);
-      setLoading(false);
-      setToast(`已生成 ${form.city}${form.days}天路线地图与沿途观察`);
-      window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 80);
-    }, 650);
-  };
-
-  const applyExample = (example: (typeof examples)[number]) => {
-    const nextInput = {
-      city: example.city,
-      days: example.days,
-      budget: example.budget,
-      interests: example.interests,
-      group: example.group,
-      prompt: example.prompt,
-    };
-    const nextLocation = makeMockLocation(example.city);
-    const nextRoute = generateSmartRoute(nextInput, nextLocation);
-    setForm(nextInput);
-    setLocation(nextLocation);
-    setPlan(generateTravelPlan(nextInput));
-    setSmartRoute(nextRoute);
-    setSelectedPointId(nextRoute.points[0]?.id);
-    setActivePointIndex(0);
-    setNavigating(false);
-    setResultMode(false);
-    setToast(`已切换到示例：${example.label}`);
-  };
-
-  const updateCity = (city: CityName) => {
-    setForm((prev) => ({ ...prev, city }));
-    setResultMode(false);
-    if (location.status !== 'success') {
-      setLocation(makeMockLocation(city));
-    }
-  };
-
-  const useCurrentLocation = async () => {
+  const locate = async () => {
     setLocating(true);
-    setLocation((prev) => ({ ...prev, status: 'locating', message: '正在请求浏览器定位授权...' }));
-    const nextLocation = await getBrowserLocation(form.city);
-    setLocation(nextLocation);
+    const result = await getBrowserLocation(request.destinationCity);
+    updateRequest({ origin: { name: result.name, city: result.city, lat: result.lat, lng: result.lng, source: result.status === 'success' ? 'browser' : 'example' } });
+    notify(result.message, result.status === 'success' ? 'success' : 'info');
     setLocating(false);
-    setToast(nextLocation.message);
   };
 
-  const chooseMockLocation = (name: string) => {
-    const option = mockLocationOptions.find((item) => item.name === name);
-    if (!option) return;
-    const nextLocation: UserLocation = {
-      ...option,
-      status: 'mock',
-      message: '已切换为手动 Mock 出发地。',
-    };
-    setLocation(nextLocation);
-    setToast(`出发地已切换为 ${option.name}`);
-  };
-
-  const regenerateRoute = () => {
-    const nextRoute = generateSmartRoute(form, location.city === form.city ? location : makeMockLocation(form.city));
-    setSmartRoute(nextRoute);
-    setSelectedPointId(nextRoute.points[0]?.id);
-    setActivePointIndex(0);
-    setNavigating(false);
-    setToast('已重新生成 AI 路线地图');
-    window.setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
-  };
-
-  const copyRouteCopy = async () => {
-    const text = smartRoute.sceneryAnalysis.socialCopy;
+  const share = async () => {
+    if (!plan) return;
     try {
-      await navigator.clipboard.writeText(text);
-      setToast('沿途小红书文案已复制');
-    } catch {
-      setToast('浏览器暂不允许复制，请手动选中文案');
+      const data = encodeSharePlan(plan);
+      const url = `${window.location.origin}${window.location.pathname}#/plan/${plan.id}?data=${data}`;
+      await navigator.clipboard.writeText(url);
+      notify('分享链接已复制；不包含照片、足迹或定位历史。', 'success');
+    } catch (error) {
+      notify(error instanceof Error ? error.message : '复制分享链接失败。', 'error');
     }
   };
 
-  const simulateNavigation = () => {
-    if (navigationTimerRef.current) {
-      window.clearInterval(navigationTimerRef.current);
-    }
-    setNavigating(true);
-    setActivePointIndex(0);
-    setSelectedPointId(smartRoute.points[0]?.id);
-    let index = 0;
-    navigationTimerRef.current = window.setInterval(() => {
-      index += 1;
-      if (index >= smartRoute.points.length) {
-        window.clearInterval(navigationTimerRef.current);
-        setNavigating(false);
-        setToast('模拟导航已完成');
-        return;
-      }
-      setActivePointIndex(index);
-      setSelectedPointId(smartRoute.points[index].id);
-    }, 900);
-    setToast('正在模拟导航，Marker 将按路线高亮');
-  };
-
-  const selectRoutePoint = (point: RoutePoint) => {
-    setSelectedPointId(point.id);
-    const index = smartRoute.points.findIndex((item) => item.id === point.id);
-    if (index >= 0) {
-      setActivePointIndex(index);
-    }
+  const toggle = <T extends string>(field: 'interests' | 'dietaryRestrictions' | 'specialNeeds', item: T) => {
+    const values = request[field] as readonly string[];
+    updateRequest({ [field]: values.includes(item) ? values.filter((value) => value !== item) : [...values, item] });
   };
 
   return (
     <main className="section-pad py-10">
       <div className="mx-auto max-w-7xl">
         <div className="mb-8">
-          <div>
-            <p className="text-sm font-black uppercase tracking-[0.2em] text-river">AI Travel Planner</p>
-            <h1 className="mt-2 font-display text-4xl font-black text-ink md:text-5xl">懂你，也懂湖北</h1>
-          </div>
+          <p className="text-sm font-black uppercase tracking-[0.2em] text-river">Rules-based Travel Planner</p>
+          <h1 className="mt-2 font-display text-4xl font-black text-ink md:text-5xl">懂你，也懂湖北</h1>
+          <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-ink/55">当前为规则引擎生成演示，不宣称已接入大模型。系统只根据你确认的结构化条件生成确定性方案。</p>
         </div>
 
-        <div className={resultMode ? 'space-y-5' : 'mx-auto max-w-5xl'}>
-          {!resultMode && <section className="glass rounded-[1.75rem] p-5 shadow-soft">
-            <Field label="目的地城市">
-              <div className="grid grid-cols-3 gap-2">
-                {cities.map((city) => (
-                  <button
-                    key={city.name}
-                    onClick={() => updateCity(city.name)}
-                    className={`rounded-2xl px-3 py-3 text-sm font-black transition active:scale-95 ${
-                      form.city === city.name ? 'bg-ink text-white' : 'bg-white/70 text-ink/70 hover:bg-white'
-                    }`}
-                  >
-                    {city.name}
-                  </button>
-                ))}
+        <div className={resultMode && plan ? 'space-y-5' : 'mx-auto max-w-5xl'}>
+          {(!resultMode || !plan) && <section className="glass rounded-[1.75rem] p-5 shadow-soft">
+            <Field label="用一句话描述旅行需求" htmlFor="travel-free-text">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <textarea id="travel-free-text" rows={3} value={request.freeText} onChange={(event) => updateRequest({ freeText: event.target.value })} className="focus-ring min-w-0 flex-1 rounded-2xl border border-white/70 bg-white px-4 py-3 font-semibold text-ink" placeholder="恩施三天两夜，预算1000元，喜欢峡谷和拍照，不吃辣" />
+                <button type="button" onClick={() => parseText()} className="rounded-2xl bg-river px-5 py-3 text-sm font-black text-white transition hover:bg-ink">识别条件</button>
               </div>
             </Field>
 
-            <Field label="定位与出发地">
-              <div className="rounded-3xl bg-white/70 p-3 shadow-sm">
-                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                  <button
-                    onClick={useCurrentLocation}
-                    disabled={locating}
-                    className="flex items-center justify-center gap-2 rounded-2xl bg-river px-4 py-3 text-sm font-black text-white transition hover:bg-ink active:scale-95 disabled:opacity-70"
-                  >
-                    {locating ? <Loader2 className="h-4 w-4 animate-spin" /> : <LocateFixed className="h-4 w-4" />}
-                    使用当前位置
-                  </button>
-                  <select
-                    value={location.name}
-                    onChange={(event) => chooseMockLocation(event.target.value)}
-                    className="focus-ring rounded-2xl border border-white/70 bg-white px-3 py-3 text-sm font-bold text-ink"
-                  >
-                    {mockLocationOptions.map((option) => (
-                      <option key={option.name} value={option.name}>{option.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="mt-3 rounded-2xl bg-ink/5 p-3 text-xs font-bold leading-6 text-ink/58">
-                  <div className="text-ink">当前城市：{location.city} · 出发点：{location.name}</div>
-                  <div>经纬度：{location.lat.toFixed(4)}, {location.lng.toFixed(4)}</div>
-                  <div>状态：{location.status} · {location.message}</div>
-                </div>
-              </div>
+            {(parsedTags.length > 0 || parseWarnings.length > 0) && <div className="mb-5 rounded-3xl bg-jade/10 p-4" aria-live="polite">
+              <div className="text-sm font-black text-ink">识别结果，请确认或修改</div>
+              <div className="mt-3 flex flex-wrap gap-2">{parsedTags.map((tag) => <span key={`${tag.type}-${tag.value}`} className="rounded-full bg-white px-3 py-1.5 text-xs font-black text-river shadow-sm">{tag.type}：{tag.value}</span>)}</div>
+              {parseWarnings.map((warning) => <p key={warning} className="mt-2 text-xs font-bold text-tower">{warning}</p>)}
+            </div>}
+
+            <Field label="快捷案例">
+              <div className="flex flex-wrap gap-2">{examples.slice(0, 4).map((example) => <button type="button" key={example.label} onClick={() => { updateRequest({ freeText: example.prompt }); window.setTimeout(() => parseText(example.prompt), 0); }} className="rounded-full bg-white/75 px-3 py-2 text-xs font-black text-ink/65 hover:bg-white">{example.label}</button>)}</div>
+            </Field>
+
+            <Field label="目的地城市">
+              <div className="grid grid-cols-3 gap-2">{cities.map((city) => <button type="button" key={city.name} aria-pressed={request.destinationCity === city.name} onClick={() => updateRequest({ destinationCity: city.name, origin: { name: `${city.name}站`, city: city.name, lat: city.name === '宜昌' ? 30.6913 : city.name === '恩施' ? 30.336 : 30.59, lng: city.name === '宜昌' ? 111.3706 : city.name === '恩施' ? 109.486 : 114.3, source: 'example' } })} className={`rounded-2xl px-3 py-3 text-sm font-black transition ${request.destinationCity === city.name ? 'bg-ink text-white' : 'bg-white/70 text-ink/70 hover:bg-white'}`}>{city.name}</button>)}</div>
             </Field>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="出行天数">
-                <div className="rounded-3xl bg-white/70 p-3 shadow-sm">
-                  <div className="flex items-center rounded-2xl border border-white/70 bg-white px-4 py-3 shadow-sm focus-within:ring-4 focus-within:ring-jade/20">
-                    <input
-                      type="number"
-                      min={1}
-                      max={15}
-                      step={1}
-                      value={form.days}
-                      onChange={(event) => setForm((prev) => ({ ...prev, days: Math.min(15, Math.max(1, Number(event.target.value) || 1)) }))}
-                      className="w-full bg-transparent text-lg font-black text-ink outline-none"
-                      aria-label="自定义出行天数"
-                    />
-                    <span className="ml-2 shrink-0 text-sm font-black text-ink/45">天</span>
-                  </div>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    {dayOptions.map((day) => (
-                      <button
-                        key={day}
-                        type="button"
-                        onClick={() => setForm((prev) => ({ ...prev, days: day }))}
-                        className={`rounded-xl py-2 text-xs font-black transition active:scale-95 ${
-                          form.days === day ? 'bg-river text-white' : 'bg-ink/5 text-ink/55 hover:bg-river/10 hover:text-river'
-                        }`}
-                      >
-                        {day} 天
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </Field>
-              <Field label="预算">
-                <div className="rounded-3xl bg-white/70 p-3 shadow-sm">
-                  <div className="flex items-center rounded-2xl border border-white/70 bg-white px-4 py-3 shadow-sm focus-within:ring-4 focus-within:ring-jade/20">
-                    <input
-                      type="number"
-                      min={0}
-                      step={50}
-                      value={form.budget}
-                      onChange={(event) => setForm((prev) => ({ ...prev, budget: Math.max(0, Number(event.target.value) || 0) }))}
-                      className="w-full bg-transparent text-lg font-black text-ink outline-none"
-                      aria-label="自定义预算金额"
-                    />
-                    <span className="ml-2 shrink-0 text-sm font-black text-ink/45">元</span>
-                  </div>
-                  <div className="mt-2 grid grid-cols-4 gap-2">
-                    {budgetOptions.map((budget) => (
-                      <button
-                        key={budget}
-                        type="button"
-                        onClick={() => setForm((prev) => ({ ...prev, budget }))}
-                        className={`rounded-xl px-2 py-2 text-xs font-black transition active:scale-95 ${
-                          form.budget === budget ? 'bg-ink text-white' : 'bg-ink/5 text-ink/55 hover:bg-river/10 hover:text-river'
-                        }`}
-                      >
-                        {budget}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </Field>
+              <Field label="出发地" htmlFor="trip-origin"><div className="flex gap-2"><input id="trip-origin" value={request.origin.name} onChange={(event) => updateRequest({ origin: { ...request.origin, name: event.target.value, source: 'manual' } })} className="focus-ring min-w-0 flex-1 rounded-2xl border border-white/70 bg-white px-4 py-3 font-bold" /><button type="button" aria-label="使用浏览器定位" disabled={locating} onClick={locate} className="grid w-12 place-items-center rounded-2xl bg-river text-white disabled:opacity-60">{locating ? <Loader2 className="h-5 w-5 animate-spin" /> : <LocateFixed className="h-5 w-5" />}</button></div></Field>
+              <Field label="出行人群" htmlFor="traveler-type"><select id="traveler-type" value={request.travelerType} onChange={(event) => updateRequest({ travelerType: event.target.value as TravelerType })} className="focus-ring w-full rounded-2xl border border-white/70 bg-white px-4 py-3 font-bold">{TRAVELERS.map((item) => <option key={item}>{item}</option>)}</select></Field>
+              <Field label="天数" htmlFor="trip-days"><input id="trip-days" type="number" min={1} max={15} value={request.days} onChange={(event) => updateRequest({ days: Number(event.target.value) })} className="focus-ring w-full rounded-2xl border border-white/70 bg-white px-4 py-3 font-black" /></Field>
+              <Field label="预算（元）" htmlFor="trip-budget"><input id="trip-budget" type="number" min={0} value={request.budget} onChange={(event) => updateRequest({ budget: Number(event.target.value) })} className="focus-ring w-full rounded-2xl border border-white/70 bg-white px-4 py-3 font-black" /></Field>
+              <Field label="开始日期" htmlFor="start-date"><input id="start-date" type="date" value={request.startDate} onChange={(event) => updateRequest({ startDate: event.target.value })} className="focus-ring w-full rounded-2xl border border-white/70 bg-white px-4 py-3 font-bold" /></Field>
+              <Field label="结束日期" htmlFor="end-date"><input id="end-date" type="date" min={request.startDate} value={request.endDate} onChange={(event) => updateRequest({ endDate: event.target.value })} className="focus-ring w-full rounded-2xl border border-white/70 bg-white px-4 py-3 font-bold" /></Field>
             </div>
 
-            <Field label="兴趣偏好">
-              <div className="flex flex-wrap gap-2">
-                {interestOptions.map((item) => (
-                  <button
-                    key={item}
-                    onClick={() => toggleInterest(item)}
-                    className={`inline-flex items-center gap-1 rounded-full px-3 py-2 text-sm font-bold transition active:scale-95 ${
-                      form.interests.includes(item) ? 'bg-jade text-white shadow-sm' : 'bg-white/75 text-ink/70 hover:bg-white'
-                    }`}
-                  >
-                    {form.interests.includes(item) && <Check className="h-3.5 w-3.5" />}
-                    {item}
-                  </button>
-                ))}
-              </div>
-            </Field>
+            <ChoiceGroup label="旅行兴趣" values={INTERESTS} selected={request.interests} onToggle={(item) => toggle<Interest>('interests', item)} />
+            <ChoiceGroup label="饮食限制" values={DIETARY_RESTRICTIONS} selected={request.dietaryRestrictions} onToggle={(item) => toggle<DietaryRestriction>('dietaryRestrictions', item)} />
+            <ChoiceGroup label="特殊需求" values={SPECIAL_NEEDS} selected={request.specialNeeds} onToggle={(item) => toggle<SpecialNeed>('specialNeeds', item)} />
 
-            <Field label="出行人群">
-              <div className="grid grid-cols-5 gap-2">
-                {groupOptions.map((group) => (
-                  <button
-                    key={group}
-                    onClick={() => setForm((prev) => ({ ...prev, group }))}
-                    className={`rounded-2xl py-3 text-sm font-black transition active:scale-95 ${
-                      form.group === group ? 'bg-tower text-white' : 'bg-white/70 text-ink/70 hover:bg-white'
-                    }`}
-                  >
-                    {group}
-                  </button>
-                ))}
-              </div>
-            </Field>
-
-            <Field label="自然语言输入">
-              <textarea
-                value={form.prompt}
-                onChange={(event) => setForm((prev) => ({ ...prev, prompt: event.target.value }))}
-                rows={4}
-                className="focus-ring w-full resize-none rounded-3xl border border-white/70 bg-white/85 px-4 py-3 leading-7 text-ink shadow-sm"
-                placeholder="例如：我想去宜昌两天一夜，预算 600，喜欢拍照和美食。"
-              />
-            </Field>
-
-            <div className="mb-5 flex flex-wrap gap-2">
-              {examples.map((example) => (
-                <button
-                  key={example.label}
-                  onClick={() => applyExample(example)}
-                  className="rounded-full bg-river/10 px-3 py-2 text-xs font-black text-river transition hover:bg-river hover:text-white active:scale-95"
-                >
-                  {example.label}
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={generate}
-              disabled={loading}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-5 py-4 font-black text-white shadow-soft transition hover:-translate-y-0.5 hover:bg-river active:scale-95 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
-              生成 AI 旅行方案
-            </button>
+            <button type="button" onClick={createPlan} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-6 py-4 font-black text-white shadow-soft transition hover:bg-river active:scale-[0.99]"><Sparkles className="h-5 w-5" />规则引擎生成演示</button>
           </section>}
 
-          {resultMode && <section ref={resultRef} className="space-y-4 scroll-mt-28">
+          {resultMode && plan && <section ref={resultRef} className="space-y-4 scroll-mt-28">
             <div className="flex flex-col justify-between gap-3 rounded-[1.5rem] bg-white/80 p-4 shadow-sm ring-1 ring-ink/5 md:flex-row md:items-center">
-              <div>
-                <div className="text-xs font-black uppercase tracking-[0.18em] text-river">AI ROUTE WORKSPACE</div>
-                <h2 className="mt-1 font-display text-2xl font-black text-ink">{plan.title}</h2>
+              <div><div className="text-xs font-black uppercase tracking-[0.18em] text-river">RULES-V1 ROUTE WORKSPACE</div><h2 className="mt-1 font-display text-2xl font-black text-ink">{plan.route.title}</h2>{replanSummary && <p className="mt-1 text-xs font-bold text-ink/55" aria-live="polite">{replanSummary}</p>}</div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={share} className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-black text-ink shadow-sm"><Copy className="h-4 w-4" />分享</button>
+                <button type="button" onClick={() => { if (window.confirm('重置当前方案？真实手账和照片会保留。')) { resetPlan(); setResultMode(false); } }} className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-black text-ink shadow-sm"><RotateCcw className="h-4 w-4" />重置方案</button>
+                <button type="button" onClick={() => setResultMode(false)} className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-black text-white"><ArrowLeft className="h-4 w-4" />返回修改</button>
               </div>
-              <button
-                onClick={() => setResultMode(false)}
-                className="inline-flex items-center justify-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-black text-white transition hover:bg-river active:scale-95"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                返回修改需求
-              </button>
             </div>
-            <MapWorkspace
-              route={smartRoute}
-              plan={plan}
-              selectedPointId={selectedPointId}
-              activePointIndex={activePointIndex}
-              navigating={navigating}
-              imageUrl={selectedCity.imageUrl}
-              onSelectPoint={selectRoutePoint}
-              onRegenerate={regenerateRoute}
-              onCopySocial={copyRouteCopy}
-              onSimulateNavigation={simulateNavigation}
-            />
-
+            <MapWorkspace route={plan.route} plan={plan.content} selectedPointId={selectedPointId} activePointIndex={Math.max(0, plan.route.points.findIndex((item) => item.id === selectedPointId))} navigating={false} imageUrl={selectedCity.imageUrl} onSelectPoint={(point: RoutePoint) => setSelectedPointId(point.id)} onRegenerate={replan} onCopySocial={async () => { try { await navigator.clipboard.writeText(plan.route.sceneryAnalysis.socialCopy); notify('路线文案已复制。', 'success'); } catch { notify('浏览器不允许复制，请手动选择。', 'error'); } }} onSimulateNavigation={() => notify('本功能仅演示路线顺序，不冒充实时导航。')} />
+            {isReplanning && <div className="fixed inset-0 z-[90] grid place-items-center bg-ink/25 backdrop-blur-sm"><div className="flex items-center gap-3 rounded-3xl bg-white px-6 py-5 font-black text-ink shadow-soft"><Loader2 className="h-5 w-5 animate-spin text-river" />规则引擎计算中…</div></div>}
           </section>}
         </div>
       </div>
@@ -408,11 +115,10 @@ export function PlannerPage({ initialCity, initialPrompt = '' }: PlannerPageProp
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="mb-5 block">
-      <span className="mb-2 block text-sm font-black text-ink/72">{label}</span>
-      {children}
-    </label>
-  );
+function Field({ label, htmlFor, children }: { label: string; htmlFor?: string; children: React.ReactNode }) {
+  return <div className="mb-5"><label htmlFor={htmlFor} className="mb-2 block text-sm font-black text-ink/72">{label}</label>{children}</div>;
+}
+
+function ChoiceGroup<T extends string>({ label, values, selected, onToggle }: { label: string; values: readonly T[]; selected: readonly T[]; onToggle: (item: T) => void }) {
+  return <fieldset className="mb-5"><legend className="mb-2 text-sm font-black text-ink/72">{label}</legend><div className="flex flex-wrap gap-2">{values.map((item) => <button type="button" key={item} aria-pressed={selected.includes(item)} onClick={() => onToggle(item)} className={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-black transition ${selected.includes(item) ? 'bg-jade text-white' : 'bg-white/70 text-ink/60'}`}>{selected.includes(item) && <Check className="h-3.5 w-3.5" />}{item}</button>)}</div></fieldset>;
 }

@@ -23,7 +23,7 @@ export function RouteMap({ route, selectedPointId, onSelectPoint, onDistanceCalc
     let disposed = false;
     async function mount() {
       if (!container.current) return;
-      if (!amapEnabled || !key) { setStatus('raster'); setMessage('高德底图已显示，当前用瓦片底图叠加 AI 实时路线。'); return; }
+      if (!amapEnabled || !key) { setStatus('raster'); setMessage('未配置高德 JS API Key，当前显示高德瓦片底图与规则路线点，不代表实时路况。'); return; }
       try {
         if (securityCode) window._AMapSecurityConfig = { securityJsCode: securityCode };
         if (!window.AMap) await new Promise<void>((resolve, reject) => {
@@ -54,14 +54,14 @@ export function RouteMap({ route, selectedPointId, onSelectPoint, onDistanceCalc
         map.setFitView([...routeResult.overlays, ...markerRef.current], false, [90, 90, 90, 90]);
         if (routeResult.planned) {
           setStatus('ready');
-          setMessage('高德地图已连接，已按真实道路生成实时导航路线。');
+          setMessage('高德地图已连接，已按道路网络生成驾车路线；结果不代表实时路况或正式导航。');
         } else {
           setStatus('ready');
           setMessage(routeResult.realLegs > 0
             ? `已按真实道路生成 ${routeResult.realLegs} 段路线；另有 ${routeResult.failedLegs} 段暂未获得导航结果，未使用直线替代。`
             : '高德底图已显示，但路径规划服务未返回道路路线。请检查 JS API Key、安全密钥和域名白名单。');
         }
-      } catch { setStatus('raster'); setMessage('真实地图加载失败，已切换高德底图瓦片并保留实时路线点。'); }
+      } catch { setStatus('raster'); setMessage('道路规划加载失败，已切换高德底图瓦片并保留规则路线点；请使用右侧文字路线。'); }
     }
     mount(); return () => { disposed = true; mapRef.current?.destroy(); mapRef.current = undefined; };
   }, [route.id, amapEnabled, key, securityCode]);
