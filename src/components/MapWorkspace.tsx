@@ -56,7 +56,12 @@ export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, n
           <CommandButton icon={Copy} label="复制文案" onClick={onCopySocial} />
         </div>
         <RouteMap route={route} selectedPointId={selectedPointId} activePointIndex={activePointIndex} navigating={navigating} onSelectPoint={onSelectPoint} onRoadPlanChange={setRoadPlan} mapOnly />
-        <div className="pointer-events-none absolute bottom-4 left-4 right-4 z-20 grid gap-2 sm:grid-cols-4"><Metric label={roadPlan.status === 'planned' ? '高德道路距离' : '估算距离'} value={roadPlan.status === 'loading' ? '计算中…' : `${(roadPlan.distanceKm ?? route.totalDistanceKm).toFixed(1)} km`} /><Metric label={roadPlan.status === 'planned' ? '预计行车' : '估算行车'} value={roadPlan.status === 'planned' && roadPlan.durationMinutes ? formatDriveDuration(roadPlan.durationMinutes) : '道路结果不可用'} /><Metric label="出发时间" value={tripPlan.settings.departureTime} /><Metric label="当前点到达" value={selected?.arrivalTime ?? selected?.time ?? '--:--'} /></div>
+        <div role="region" aria-label="地图行程摘要" className={`pointer-events-none absolute bottom-4 left-4 right-4 z-20 grid gap-2 ${roadPlan.status === 'planned' ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
+          <Metric tone="river" label={roadPlan.status === 'planned' ? '高德道路距离' : '估算距离'} value={roadPlan.status === 'loading' ? '计算中…' : `${(roadPlan.distanceKm ?? route.totalDistanceKm).toFixed(1)} km`} />
+          {roadPlan.status === 'planned' && roadPlan.durationMinutes && <Metric tone="jade" label="预计行车" value={formatDriveDuration(roadPlan.durationMinutes)} />}
+          <Metric tone="tower" label="出发时间" value={tripPlan.settings.departureTime} />
+          <Metric label="当前点到达" value={selected?.arrivalTime ?? selected?.time ?? '--:--'} />
+        </div>
       </div>
 
       <aside aria-label="方案详情" className={`${mobilePane === 'details' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-col overflow-hidden bg-[#fffdf7] lg:flex`}>
@@ -197,7 +202,10 @@ function BudgetRow({ item, index, onUpdate, onDelete }: { item: BudgetItem; inde
 }
 
 function CommandButton({ icon: Icon, label, onClick, disabled, spin }: { icon: typeof RefreshCw; label: string; onClick?: () => void; disabled?: boolean; spin?: boolean }) { return <button type="button" aria-label={label} disabled={disabled} onClick={onClick} className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-white/90 px-4 py-2 text-xs font-black text-ink shadow-soft backdrop-blur disabled:opacity-60"><Icon className={`h-4 w-4 ${spin ? 'animate-spin' : ''}`} />{label}</button>; }
-function Metric({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl bg-ink/88 p-3 text-white shadow-soft backdrop-blur"><div className="text-[10px] font-black uppercase tracking-wider text-white/55">{label}</div><div className="mt-1 font-black">{value}</div></div>; }
+function Metric({ label, value, tone = 'ink' }: { label: string; value: string; tone?: 'ink' | 'river' | 'tower' | 'jade' }) {
+  const tones = { ink: 'border-white/15 bg-[#10272f]/95', river: 'border-white/20 bg-[#0e6b72]/95', tower: 'border-white/20 bg-[#b64a32]/95', jade: 'border-white/20 bg-[#18775e]/95' };
+  return <div className={`rounded-2xl border p-3 text-white shadow-[0_12px_28px_rgba(18,34,42,.28)] backdrop-blur-sm ${tones[tone]}`}><div className="text-[10px] font-black uppercase tracking-[.12em] text-white/70">{label}</div><div className="mt-1 font-display text-lg font-black leading-tight text-white">{value}</div></div>;
+}
 function formatDriveDuration(minutes: number) { const hours = Math.floor(minutes / 60); const rest = minutes % 60; return hours > 0 ? `${hours}小时${rest ? `${rest}分` : ''}` : `${rest}分钟`; }
 function EditableMetric({ label, value, min, max, step = 1, prefix = '', suffix = '', onCommit }: { label: string; value: number; min: number; max: number; step?: number; prefix?: string; suffix?: string; onCommit: (value: number) => void }) { const [draft, setDraft] = useState(String(value)); useEffect(() => setDraft(String(value)), [value]); const commit = () => { const parsed = Number(draft); const next = Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : value; setDraft(String(next)); onCommit(next); }; return <label className="rounded-2xl bg-white p-4 shadow-sm transition focus-within:ring-4 focus-within:ring-jade/15"><span className="block text-xs font-black text-ink/50">{label}</span><span className="mt-2 flex items-baseline gap-1 font-display text-xl font-black text-ink">{prefix && <span>{prefix}</span>}<input aria-label={`总览${label}`} type="number" min={min} max={max} step={step} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} className="focus-ring min-w-0 w-full bg-transparent font-display text-xl font-black text-ink" />{suffix && <span className="shrink-0 text-sm">{suffix}</span>}</span></label>; }
 

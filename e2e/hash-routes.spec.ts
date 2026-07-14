@@ -72,6 +72,8 @@ test('overview metrics are directly editable and persist', async ({ page }) => {
   await expect(page.getByText('RULES-BASED TRAVEL PLANNER', { exact: true })).toHaveCount(0);
   await expect(page.getByText('已根据当前确认参数生成规则路线。', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '分享' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: '地图行程摘要' })).toBeVisible();
+  await expect(page.getByText('道路结果不可用', { exact: true })).toHaveCount(0);
 
   await page.getByLabel('总览点位').fill('4');
   await page.getByLabel('总览点位').press('Enter');
