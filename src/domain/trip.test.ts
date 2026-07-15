@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { addDaysIso, budgetTotal, buildSocialCopy, calculateTimeline, daysBetween, decodeSharePlan, defaultTripRequest, encodeSharePlan, generateTripPlan, parseLocalDate, parseTravelRequest } from './trip';
+import { addDaysIso, budgetTotal, buildFoodRecommendations, buildSocialCopy, calculateTimeline, daysBetween, decodeSharePlan, defaultTripRequest, encodeSharePlan, generateTripPlan, parseLocalDate, parseTravelRequest } from './trip';
 import type { RoutePoint } from '../types/route';
+
+describe('buildFoodRecommendations', () => {
+  it('returns verified merchant detail links instead of category search links', () => {
+    const foods = buildFoodRecommendations(defaultTripRequest('宜昌'));
+
+    expect(foods).toHaveLength(2);
+    expect(foods[0].name).toContain('郑信记凉虾');
+    expect(foods.every((food) => /dianping\.com\/shop\//.test(food.dianpingUrl))).toBe(true);
+    expect(foods.every((food) => !food.dianpingUrl.includes('/search/keyword/'))).toBe(true);
+  });
+});
 
 describe('parseTravelRequest', () => {
   const cases = [

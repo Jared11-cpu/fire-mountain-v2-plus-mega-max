@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, BookOpen, Camera, Download, ImagePlus, Loader2, MapPin, Route as RouteIcon, UploadCloud, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, Camera, Download, ImagePlus, Loader2, MapPin, Pencil, Route as RouteIcon, Save, Trash2, UploadCloud, X } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { cities, type CityName } from '../data/mockData';
 import { parseLocalDate } from '../domain/trip';
 import { clearJournal, compressPhoto, deletePhoto, loadPhoto, savePhoto } from '../services/journalStorage';
 import { useTrip } from '../state/tripStore';
-import type { JournalEntry } from '../types/route';
+import type { JournalEntry, RoutePoint, SmartRoute } from '../types/route';
+import { RouteMap } from './RouteMap';
 
 type PendingPhoto = { id: string; file: File; preview: string; progress: number; status: 'pending' | 'compressing' | 'saved' | 'error'; error?: string };
 type JournalMapEntry = JournalEntry & { photoUrl?: string; isExample?: boolean };
@@ -27,6 +28,7 @@ export function JournalPage() {
   const [saving, setSaving] = useState(false);
   const [exportingPoster, setExportingPoster] = useState(false);
   const [formError, setFormError] = useState('');
+  const [showComposer, setShowComposer] = useState(false);
 
   useEffect(() => { pendingRef.current = pending; }, [pending]);
   useEffect(() => () => pendingRef.current.forEach((item) => URL.revokeObjectURL(item.preview)), []);
@@ -115,34 +117,62 @@ export function JournalPage() {
     } finally { setExportingPoster(false); }
   };
 
-  if (entryId) return <JournalDetail entry={entries.find((entry) => entry.id === entryId)} photoUrls={photoUrls} onBack={() => navigate('/journal')} />;
+  if (entryId) return <JournalDetail entry={entries.find((entry) => entry.id === entryId)} photoUrls={photoUrls} onBack={() => navigate('/journal')} onSave={(updated) => setJournalEntries(entries.map((item) => item.id === updated.id ? updated : item))} onDelete={async (entry) => { await removeEntry(entry); navigate('/journal'); }} notify={notify} />;
 
-  return <main className="section-pad py-10"><div className="mx-auto max-w-7xl">
-    <div className="flex flex-col justify-between gap-5 md:flex-row md:items-end"><div><p className="text-sm font-black uppercase tracking-[.2em] text-river">Travel Journal</p><h1 className="mt-2 font-display text-4xl font-black md:text-5xl">把一路山水，写成自己的湖北故事</h1><p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-ink/55">照片留住风景，文字记下心情；每一次真实抵达，都成为以后可以重新翻阅的一页。</p></div><div className="grid grid-cols-3 gap-2">{[['地点', stats.places], ['城市', stats.cities], ['照片', stats.photos]].map(([label, value]) => <div key={label} className="rounded-2xl bg-white px-4 py-3 text-center shadow-sm"><div className="font-display text-2xl font-black">{value}</div><div className="text-xs font-bold text-ink/45">{label}</div></div>)}</div></div>
+  return <main aria-label="旅行手账地图" className="relative h-[calc(100vh-10.25rem)] min-h-[690px] overflow-hidden bg-[#d8eee8]">
+    <JournalRouteMap entries={visibleEntries} mode={mode} sourceRoute={plan?.route} onOpen={(id) => mode === 'real' && navigate(`/journal/${id}`)} />
 
-    <div className="mt-8 grid items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(300px,3fr)]">
-      <section aria-label="旅行手账地图" className="journal-map journal-a4-page order-1 flex min-w-0 flex-col overflow-hidden rounded-[1.6rem] border border-ink/8 p-5 shadow-[0_28px_75px_rgba(18,34,42,.13)] md:p-7">
-        <div><div className="flex items-center gap-2 text-xs font-black tracking-[.2em] text-river"><RouteIcon className="h-4 w-4"/>MY HUBEI ROUTE</div><h2 className="journal-handwriting mt-2 text-4xl font-black">我的旅行路线手账</h2><p className="mt-2 text-xs font-bold text-ink/45">湖北轮廓、足迹顺序与手账便签会一起保存到海报。</p><div className="mt-4 flex flex-wrap items-center justify-between gap-2"><div className="flex rounded-full bg-white/70 p-1 shadow-sm" role="tablist">{(['real', 'example'] as const).map((item) => <button key={item} type="button" role="tab" aria-selected={mode === item} onClick={() => setMode(item)} className={`rounded-full px-4 py-2 text-xs font-black transition ${mode === item ? 'bg-ink text-white' : 'text-ink/50'}`}>{item === 'real' ? `真实足迹 ${entries.length}` : `示例路线 ${examplePoints.length}`}</button>)}</div><button type="button" disabled={visibleEntries.length === 0 || exportingPoster} onClick={savePoster} className="inline-flex items-center gap-2 rounded-full bg-tower px-4 py-2.5 text-xs font-black text-white shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40"><Download className="h-4 w-4"/>{exportingPoster ? '正在绘制…' : '保存手写海报'}</button></div></div>
-        <JournalRouteMap entries={visibleEntries} mode={mode} onOpen={(id) => mode === 'real' && navigate(`/journal/${id}`)} />
-        <div className="mt-5 flex items-center justify-between border-t border-ink/8 pt-4 text-xs font-bold text-ink/45"><span>{mode === 'real' ? '点击地图便签，翻开这一站的完整手账。' : '示例路线不计入真实足迹。'}</span>{entries.length > 0 && mode === 'real' && <button type="button" onClick={clearAll} className="font-black text-red-600">清空真实记录</button>}</div>
-      </section>
+    <section className="pointer-events-none absolute left-4 right-4 top-4 z-50 flex items-start justify-between gap-4">
+      <div className="pointer-events-auto max-w-[min(640px,calc(100vw-2rem))] rounded-[1.4rem] border border-white/65 bg-white/88 p-3 shadow-[0_18px_55px_rgba(18,34,42,.2)] backdrop-blur-xl md:p-4">
+        <div className="flex flex-wrap items-center gap-3"><div><div className="flex items-center gap-2 text-[10px] font-black tracking-[.2em] text-river"><RouteIcon className="h-4 w-4"/>MY HUBEI ROUTE</div><h1 className="journal-handwriting mt-1 text-2xl font-black md:text-3xl">我的旅行路线手账</h1></div><div className="ml-auto hidden grid-cols-3 gap-1.5 sm:grid">{[['地点', stats.places], ['城市', stats.cities], ['照片', stats.photos]].map(([label, value]) => <div key={label} className="min-w-14 rounded-xl bg-ink/[.05] px-2 py-1.5 text-center"><b className="block text-sm">{value}</b><span className="text-[9px] font-bold text-ink/45">{label}</span></div>)}</div></div>
+        <div className="mt-3 flex flex-wrap items-center gap-2"><div className="flex rounded-full bg-ink/[.06] p-1" role="tablist">{(['real', 'example'] as const).map((item) => <button key={item} type="button" role="tab" aria-selected={mode === item} onClick={() => setMode(item)} className={`rounded-full px-3 py-2 text-[11px] font-black transition ${mode === item ? 'bg-ink text-white shadow-sm' : 'text-ink/55'}`}>{item === 'real' ? `真实足迹 ${entries.length}` : `示例路线 ${examplePoints.length}`}</button>)}</div><button type="button" onClick={() => setShowComposer(true)} className="inline-flex items-center gap-1.5 rounded-full bg-river px-3 py-2 text-[11px] font-black text-white"><BookOpen className="h-3.5 w-3.5"/>记下这一刻</button><button type="button" disabled={visibleEntries.length === 0 || exportingPoster} onClick={savePoster} className="inline-flex items-center gap-1.5 rounded-full bg-tower px-3 py-2 text-[11px] font-black text-white disabled:opacity-40"><Download className="h-3.5 w-3.5"/>{exportingPoster ? '正在绘制…' : '保存海报'}</button>{entries.length > 0 && mode === 'real' && <button type="button" onClick={clearAll} className="rounded-full px-3 py-2 text-[11px] font-black text-red-600">清空记录</button>}</div>
+      </div>
+    </section>
 
-      <section aria-label="新增旅行记录" className="paper-card order-2 rounded-[1.6rem] p-5 lg:sticky lg:top-28"><div className="flex items-center gap-2"><BookOpen className="h-5 w-5 text-tower"/><h2 className="font-display text-2xl font-black">记下这一刻</h2></div><p className="mt-2 text-xs font-bold leading-5 text-ink/45">写下地点与心情，也可以只用照片替你记住当时的光。</p><div className="mt-5 grid gap-4"><Field label="地点 *" htmlFor="journal-place"><input id="journal-place" value={draft.pointName} onChange={(event) => setDraft({ ...draft, pointName: event.target.value })} placeholder="例如：黄鹤楼" className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3" /></Field><Field label="日期 *" htmlFor="journal-date"><input id="journal-date" type="date" value={draft.visitedAt} onChange={(event) => setDraft({ ...draft, visitedAt: event.target.value })} className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3" /></Field><Field label="城市" htmlFor="journal-city"><select id="journal-city" value={draft.city} onChange={(event) => setDraft({ ...draft, city: event.target.value as CityName })} className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3">{cities.map((city) => <option key={city.name}>{city.name}</option>)}</select></Field><Field label="手账心得（与照片至少填一项）" htmlFor="journal-note"><textarea id="journal-note" rows={5} value={draft.note} placeholder="当时看见了什么、听见了什么？" onChange={(event) => setDraft({ ...draft, note: event.target.value })} className="journal-handwriting focus-ring w-full resize-none rounded-2xl border border-ink/10 bg-white px-4 py-3 text-lg leading-7" /></Field></div>
-        <label className="mt-4 flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-river/40 bg-white/70 px-4 py-4 font-black text-river"><ImagePlus className="h-5 w-5" />选择照片<input type="file" accept="image/*" multiple className="sr-only" onChange={(event) => { chooseFiles(event.target.files); event.currentTarget.value = ''; }} /></label><p className="mt-2 text-xs font-bold leading-5 text-ink/45">每次最多6张，原图每张≤10MB；最长边1920px，压缩后仅保存在本机 IndexedDB。</p>
-        {pending.length > 0 && <div className="mt-4 grid grid-cols-2 gap-3">{pending.map((photo) => <div key={photo.id} className="relative overflow-hidden rounded-2xl bg-white p-2 shadow-sm"><img src={photo.preview} alt="待上传预览" className="aspect-square w-full rounded-xl object-cover" /><button type="button" aria-label="删除待上传照片" onClick={() => removePending(photo.id)} className="absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-full bg-black/65 text-white"><X className="h-4 w-4" /></button><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink/10"><div className="h-full bg-jade" style={{ width: `${photo.progress}%` }} /></div><div className="mt-1 text-[10px] font-bold text-ink/50">{photo.status === 'compressing' ? `压缩 ${photo.progress}%` : photo.status === 'saved' ? '已写入' : '等待保存'}</div></div>)}</div>}
-        {formError && <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{formError}</p>}
-        <button type="button" disabled={saving} onClick={saveRecord} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-5 py-4 font-black text-white disabled:opacity-60">{saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <UploadCloud className="h-5 w-5" />}{saving ? '保存中…' : '保存这一页'}</button>
-      </section>
-    </div>
-  </div></main>;
+    {showComposer && <aside aria-label="新增旅行记录" className="absolute bottom-4 right-4 top-4 z-[60] w-[min(390px,calc(100vw-2rem))] overflow-y-auto rounded-[1.6rem] border border-white/70 bg-[#fffdf7]/94 p-5 shadow-[0_28px_80px_rgba(18,34,42,.28)] backdrop-blur-xl"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><BookOpen className="h-5 w-5 text-tower"/><h2 className="font-display text-2xl font-black">记下这一刻</h2></div><button type="button" aria-label="关闭新增手账" onClick={() => setShowComposer(false)} className="grid h-9 w-9 place-items-center rounded-full bg-ink/5"><X className="h-4 w-4"/></button></div><div className="mt-5 grid gap-4"><Field label="地点 *" htmlFor="journal-place"><input id="journal-place" value={draft.pointName} onChange={(event) => setDraft({ ...draft, pointName: event.target.value })} placeholder="例如：黄鹤楼" className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3" /></Field><Field label="日期 *" htmlFor="journal-date"><input id="journal-date" type="date" value={draft.visitedAt} onChange={(event) => setDraft({ ...draft, visitedAt: event.target.value })} className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3" /></Field><Field label="城市" htmlFor="journal-city"><select id="journal-city" value={draft.city} onChange={(event) => setDraft({ ...draft, city: event.target.value as CityName })} className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3">{cities.map((city) => <option key={city.name}>{city.name}</option>)}</select></Field><Field label="手账心得" htmlFor="journal-note"><textarea id="journal-note" rows={5} value={draft.note} placeholder="当时看见了什么、听见了什么？" onChange={(event) => setDraft({ ...draft, note: event.target.value })} className="journal-handwriting focus-ring w-full resize-none rounded-2xl border border-ink/10 bg-white px-4 py-3 text-lg leading-7" /></Field></div>
+      <label className="mt-4 flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-river/40 bg-white/70 px-4 py-4 font-black text-river"><ImagePlus className="h-5 w-5" />选择照片<input type="file" accept="image/*" multiple className="sr-only" onChange={(event) => { chooseFiles(event.target.files); event.currentTarget.value = ''; }} /></label>
+      {pending.length > 0 && <div className="mt-4 grid grid-cols-2 gap-3">{pending.map((photo) => <div key={photo.id} className="relative overflow-hidden rounded-2xl bg-white p-2 shadow-sm"><img src={photo.preview} alt="待上传预览" className="aspect-square w-full rounded-xl object-cover" /><button type="button" aria-label="删除待上传照片" onClick={() => removePending(photo.id)} className="absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-full bg-black/65 text-white"><X className="h-4 w-4" /></button><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink/10"><div className="h-full bg-jade" style={{ width: `${photo.progress}%` }} /></div></div>)}</div>}
+      {formError && <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{formError}</p>}<button type="button" disabled={saving} onClick={saveRecord} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-5 py-4 font-black text-white disabled:opacity-60">{saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <UploadCloud className="h-5 w-5" />}{saving ? '保存中…' : '保存这一页'}</button>
+    </aside>}
+  </main>;
 }
 
-function JournalRouteMap({ entries, mode, onOpen }: { entries: JournalMapEntry[]; mode: 'real' | 'example'; onOpen: (id: string) => void }) {
-  const status = entries.length ? `${mode === 'real' ? '我的真实足迹' : '行程示例'} · ${entries.length} 站 · 湖北轮廓示意` : mode === 'real' ? '还没有真实记录，先在右侧写下第一站。' : '请先生成一条示例路线。';
-  return <div className="relative mt-5 min-h-[620px] flex-1 overflow-hidden rounded-[1.15rem] border border-ink/8 bg-[#e3eee9]">
-    <JournalPaperMap entries={entries} onOpen={onOpen} />
-    <div className="pointer-events-none absolute left-4 top-4 z-20 rounded-full bg-white/92 px-3 py-2 text-[11px] font-black text-river shadow-lg backdrop-blur">{status}</div>
+function JournalRouteMap({ entries, mode, sourceRoute, onOpen }: { entries: JournalMapEntry[]; mode: 'real' | 'example'; sourceRoute?: SmartRoute; onOpen: (id: string) => void }) {
+  const orderedEntries = useMemo(() => orderJournalEntries(entries, sourceRoute), [entries, sourceRoute]);
+  const route = useMemo(() => buildJournalMapRoute(orderedEntries, sourceRoute, mode), [orderedEntries, sourceRoute, mode]);
+  const [selectedId, setSelectedId] = useState<string | undefined>(orderedEntries[0]?.id);
+  useEffect(() => { setSelectedId(orderedEntries[0]?.id); }, [mode, orderedEntries[0]?.id]);
+  const selectedIndex = Math.max(0, route?.points.findIndex((point) => point.id === selectedId) ?? 0);
+
+  if (!route) return <div className="grid h-full min-h-[690px] place-items-center bg-[#e3eee9]"><div className="rounded-3xl bg-white/90 px-8 py-7 text-center text-ink/45 shadow-xl backdrop-blur"><MapPin className="mx-auto h-10 w-10 text-river/45" /><p className="mt-3 font-black">{mode === 'real' ? '还没有真实记录，点击“记下这一刻”添加第一站。' : '请先生成一条示例路线。'}</p></div></div>;
+
+  return <div className="relative h-full min-h-[690px] overflow-hidden bg-white">
+    <RouteMap route={route} selectedPointId={selectedId} activePointIndex={selectedIndex} navigating={false} journalCards={orderedEntries.map(({ id, note, photoUrl }) => ({ id, note, photoUrl }))} onSelectPoint={(point) => { setSelectedId(point.id); if (mode === 'real') onOpen(point.id); }} mapOnly />
+    <div className="pointer-events-none absolute bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-full bg-ink/88 px-4 py-2 text-[11px] font-black text-white shadow-lg backdrop-blur">{mode === 'real' ? '点击地点卡片翻开并编辑完整手账' : '示例路线仅供查看'} · {orderedEntries.length} 站</div>
   </div>;
+}
+
+function orderJournalEntries(entries: JournalMapEntry[], sourceRoute?: SmartRoute) {
+  const pointOrder = new Map(sourceRoute?.points.map((point, index) => [point.id, index]) ?? []);
+  return entries.slice().sort((left, right) => left.visitedAt.localeCompare(right.visitedAt) || left.day - right.day || (pointOrder.get(left.pointId) ?? 999) - (pointOrder.get(right.pointId) ?? 999));
+}
+
+export function buildJournalMapRoute(entries: JournalMapEntry[], sourceRoute: SmartRoute | undefined, mode: 'real' | 'example'): SmartRoute | null {
+  const valid = entries.filter((entry) => Number.isFinite(entry.lng) && Number.isFinite(entry.lat));
+  if (!valid.length) return null;
+  const points: RoutePoint[] = valid.map((entry, index) => {
+    const sourcePoint = sourceRoute?.points.find((point) => point.id === entry.pointId);
+    return {
+      ...(sourcePoint ?? {}), id: entry.id, name: entry.pointName, city: entry.city, lat: entry.lat!, lng: entry.lng!, coordinateSystem: sourcePoint?.coordinateSystem ?? 'gcj02',
+      type: index === 0 ? 'start' : index === valid.length - 1 ? 'end' : sourcePoint?.type ?? 'scenic', time: sourcePoint?.time ?? '09:00', stayMinutes: sourcePoint?.stayMinutes ?? 30,
+      reason: entry.note || sourcePoint?.reason || '旅行手账中的真实抵达记录。', photoTip: entry.photoIds.length ? `已保存 ${entry.photoIds.length} 张照片。` : sourcePoint?.photoTip || '可以补充这一站的照片。', recordTip: entry.note || sourcePoint?.recordTip || '这一站等待你的心得。', imageUrl: entry.photoUrl ?? sourcePoint?.imageUrl,
+    } as RoutePoint;
+  });
+  return {
+    id: `journal-${mode}-${valid.map((entry) => entry.id).join('-')}`, title: mode === 'real' ? '我的旅行手账路线' : sourceRoute?.title ?? '行程示例路线', city: points[0].city, startPoint: points[0], points,
+    totalDistanceKm: sourceRoute?.totalDistanceKm ?? 0, estimatedTime: sourceRoute?.estimatedTime ?? '按足迹顺序连接', transportSuggestion: sourceRoute?.transportSuggestion ?? '手账路线仅用于回顾', recommendedStartTime: sourceRoute?.recommendedStartTime ?? '09:00', avoidTips: sourceRoute?.avoidTips ?? [],
+    sceneryAnalysis: sourceRoute?.sceneryAnalysis ?? { highlights: [], bestPhotoTimes: [], videoShots: [], socialCopy: '', crowdTips: {} },
+  };
 }
 
 function JournalPaperMap({ entries, onOpen }: { entries: JournalMapEntry[]; onOpen: (id: string) => void }) {
@@ -220,15 +250,49 @@ async function downloadJournalPoster(entries: JournalMapEntry[], mode: 'real' | 
   } finally { URL.revokeObjectURL(svgUrl); }
 }
 
-function JournalDetail({ entry, photoUrls, onBack }: { entry?: JournalEntry; photoUrls: Record<string, string>; onBack: () => void }) {
+function JournalDetail({ entry, photoUrls, onBack, onSave, onDelete, notify }: { entry?: JournalEntry; photoUrls: Record<string, string>; onBack: () => void; onSave: (entry: JournalEntry) => void; onDelete: (entry: JournalEntry) => Promise<void>; notify: ReturnType<typeof useTrip>['notify'] }) {
   if (!entry) return <main className="section-pad py-12"><div className="mx-auto max-w-3xl text-center"><h1 className="font-display text-4xl font-black">没有找到这一页手账</h1><button type="button" onClick={onBack} className="mt-6 rounded-full bg-ink px-5 py-3 font-black text-white">返回旅行手账</button></div></main>;
-  const photos = entry.photoIds.map((id) => photoUrls[id]).filter(Boolean);
-  return <main className="section-pad py-10"><div className="mx-auto max-w-4xl"><button type="button" onClick={onBack} className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-black shadow-sm"><ArrowLeft className="h-4 w-4"/>返回路线手账</button><article className="journal-a4-page journal-notebook-lines relative mt-6 overflow-hidden rounded-[1.5rem] border border-ink/10 px-8 pb-14 pt-8 shadow-[0_30px_90px_rgba(18,34,42,.16)] md:px-14 md:pt-12">
+  return <JournalDetailEditor entry={entry} photoUrls={photoUrls} onBack={onBack} onSave={onSave} onDelete={onDelete} notify={notify} />;
+}
+
+function JournalDetailEditor({ entry, photoUrls, onBack, onSave, onDelete, notify }: { entry: JournalEntry; photoUrls: Record<string, string>; onBack: () => void; onSave: (entry: JournalEntry) => void; onDelete: (entry: JournalEntry) => Promise<void>; notify: ReturnType<typeof useTrip>['notify'] }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ pointName: entry.pointName, city: entry.city, visitedAt: entry.visitedAt, note: entry.note });
+  const [removedPhotoIds, setRemovedPhotoIds] = useState<string[]>([]);
+  const [newPhotos, setNewPhotos] = useState<{ file: File; preview: string }[]>([]);
+  const newPhotosRef = useRef<{ file: File; preview: string }[]>([]);
+  const [savingChanges, setSavingChanges] = useState(false);
+  const visiblePhotoIds = entry.photoIds.filter((id) => !removedPhotoIds.includes(id));
+  const photos = visiblePhotoIds.map((id) => ({ id, url: photoUrls[id] })).filter((item): item is { id: string; url: string } => Boolean(item.url));
+
+  useEffect(() => { newPhotosRef.current = newPhotos; }, [newPhotos]);
+  useEffect(() => () => newPhotosRef.current.forEach((photo) => URL.revokeObjectURL(photo.preview)), []);
+
+  const cancelEditing = () => {
+    newPhotos.forEach((photo) => URL.revokeObjectURL(photo.preview));
+    setNewPhotos([]); setRemovedPhotoIds([]); setDraft({ pointName: entry.pointName, city: entry.city, visitedAt: entry.visitedAt, note: entry.note }); setEditing(false);
+  };
+  const saveChanges = async () => {
+    if (!draft.pointName.trim() || !draft.visitedAt) { notify('地点和日期不能为空。', 'error'); return; }
+    setSavingChanges(true);
+    const savedIds: string[] = [];
+    try {
+      for (const photo of newPhotos) savedIds.push(await savePhoto(await compressPhoto(photo.file)));
+      await Promise.all(removedPhotoIds.map(deletePhoto));
+      onSave({ ...entry, pointName: draft.pointName.trim(), city: draft.city, visitedAt: draft.visitedAt, note: draft.note.trim(), photoIds: [...visiblePhotoIds, ...savedIds] });
+      newPhotos.forEach((photo) => URL.revokeObjectURL(photo.preview));
+      setNewPhotos([]); setRemovedPhotoIds([]); setEditing(false); notify('手账详细内容已更新。', 'success');
+    } catch (error) {
+      await Promise.all(savedIds.map(deletePhoto));
+      console.error('Journal detail update failed', error); notify('手账修改保存失败，请检查浏览器存储空间。', 'error');
+    } finally { setSavingChanges(false); }
+  };
+
+  return <main className="section-pad py-10"><div className="mx-auto max-w-4xl"><div className="flex flex-wrap items-center justify-between gap-3"><button type="button" onClick={onBack} className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-black shadow-sm"><ArrowLeft className="h-4 w-4"/>返回路线手账</button><div className="flex gap-2">{editing ? <><button type="button" onClick={cancelEditing} className="rounded-full bg-white px-4 py-2 text-sm font-black shadow-sm">取消</button><button type="button" disabled={savingChanges} onClick={saveChanges} className="inline-flex items-center gap-2 rounded-full bg-river px-4 py-2 text-sm font-black text-white shadow-sm"><Save className="h-4 w-4"/>{savingChanges ? '保存中…' : '保存修改'}</button></> : <><button type="button" onClick={() => setEditing(true)} className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-black text-white"><Pencil className="h-4 w-4"/>编辑这一页</button><button type="button" aria-label="删除这一页手账" onClick={() => window.confirm('确定删除这一页手账和照片吗？') && onDelete(entry)} className="grid h-10 w-10 place-items-center rounded-full bg-red-50 text-red-600"><Trash2 className="h-4 w-4"/></button></>}</div></div><article className="journal-a4-page journal-notebook-lines relative mt-6 overflow-hidden rounded-[1.5rem] border border-ink/10 px-8 pb-14 pt-8 shadow-[0_30px_90px_rgba(18,34,42,.16)] md:px-14 md:pt-12">
     <div className="absolute bottom-0 left-9 top-0 w-px bg-tower/20" />
-    <section className="relative z-10 overflow-hidden rounded-[1.25rem] bg-ink/[.04]">{photos.length > 0 ? <div className={`grid gap-2 ${photos.length > 1 ? 'grid-cols-2' : ''}`}>{photos.map((url, index) => <img key={url} src={url} alt={`${entry.pointName}记录照片${index + 1}`} className={`w-full object-cover ${photos.length === 1 ? 'aspect-[16/9]' : 'aspect-[4/3]'}`} />)}</div> : <div className="grid aspect-[16/7] place-items-center text-center text-ink/30"><div><Camera className="mx-auto h-9 w-9"/><p className="mt-2 text-sm font-black">这一页没有照片</p></div></div>}</section>
-    <header className="relative z-10 mt-8 border-b-2 border-ink/10 pb-6 pl-4"><div className="text-xs font-black uppercase tracking-[.22em] text-river">My Hubei Travel Note</div><h1 className="journal-handwriting mt-2 text-5xl font-black leading-tight">{entry.pointName}</h1><div className="mt-3 flex flex-wrap gap-3 text-sm font-bold text-ink/45"><span>{entry.city}</span><span>·</span><time>{formatJournalDate(entry.visitedAt)}</time></div></header>
-    <section className="relative z-10 min-h-[360px] pl-4 pt-6"><p className="journal-handwriting whitespace-pre-wrap text-2xl leading-[2rem] text-ink/76">{entry.note || '这一站没有留下文字，但照片已经替我记住了当时的光。'}</p></section>
-    <footer className="relative z-10 mt-8 flex justify-end"><div className="journal-handwriting max-w-sm rotate-[-2deg] text-right text-lg leading-8 text-ink/55"><p>感谢这次抵达，</p><p>也感谢认真记录当下的自己。</p></div></footer>
+    <section className="relative z-10 overflow-hidden rounded-[1.25rem] bg-ink/[.04]">{photos.length > 0 || newPhotos.length > 0 ? <div className="grid grid-cols-2 gap-2">{photos.map(({ id, url }, index) => <div key={id} className="relative"><img src={url} alt={`${entry.pointName}记录照片${index + 1}`} className="aspect-[4/3] w-full object-cover" />{editing && <button type="button" aria-label="移除照片" onClick={() => setRemovedPhotoIds([...removedPhotoIds, id])} className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full bg-black/70 text-white"><X className="h-4 w-4"/></button>}</div>)}{newPhotos.map((photo, index) => <div key={photo.preview} className="relative"><img src={photo.preview} alt={`新增照片${index + 1}`} className="aspect-[4/3] w-full object-cover"/><button type="button" aria-label="移除新增照片" onClick={() => { URL.revokeObjectURL(photo.preview); setNewPhotos(newPhotos.filter((item) => item !== photo)); }} className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full bg-black/70 text-white"><X className="h-4 w-4"/></button></div>)}</div> : <div className="grid aspect-[16/7] place-items-center text-center text-ink/30"><div><Camera className="mx-auto h-9 w-9"/><p className="mt-2 text-sm font-black">这一页没有照片</p></div></div>}{editing && <label className="flex cursor-pointer items-center justify-center gap-2 border-t border-dashed border-river/30 bg-white/70 px-4 py-4 text-sm font-black text-river"><ImagePlus className="h-4 w-4"/>添加照片<input type="file" accept="image/*" multiple className="sr-only" onChange={(event) => { const files = Array.from(event.target.files ?? []); setNewPhotos([...newPhotos, ...files.slice(0, Math.max(0, 6 - visiblePhotoIds.length - newPhotos.length)).map((file) => ({ file, preview: URL.createObjectURL(file) }))]); event.currentTarget.value = ''; }}/></label>}</section>
+    <header className="relative z-10 mt-8 border-b-2 border-ink/10 pb-6 pl-4"><div className="text-xs font-black uppercase tracking-[.22em] text-river">My Hubei Travel Note</div>{editing ? <div className="mt-4 grid gap-3 md:grid-cols-2"><Field label="地点" htmlFor="detail-place"><input id="detail-place" value={draft.pointName} onChange={(event) => setDraft({ ...draft, pointName: event.target.value })} className="w-full rounded-xl border border-ink/10 bg-white px-4 py-3 font-black"/></Field><Field label="日期" htmlFor="detail-date"><input id="detail-date" type="date" value={draft.visitedAt} onChange={(event) => setDraft({ ...draft, visitedAt: event.target.value })} className="w-full rounded-xl border border-ink/10 bg-white px-4 py-3"/></Field><Field label="城市" htmlFor="detail-city"><select id="detail-city" value={draft.city} onChange={(event) => setDraft({ ...draft, city: event.target.value as CityName })} className="w-full rounded-xl border border-ink/10 bg-white px-4 py-3">{cities.map((city) => <option key={city.name}>{city.name}</option>)}</select></Field></div> : <><h1 className="journal-handwriting mt-2 text-5xl font-black leading-tight">{entry.pointName}</h1><div className="mt-3 flex flex-wrap gap-3 text-sm font-bold text-ink/45"><span>{entry.city}</span><span>·</span><time>{formatJournalDate(entry.visitedAt)}</time></div></>}</header>
+    <section className="relative z-10 min-h-[360px] pl-4 pt-6">{editing ? <textarea aria-label="手账心得" rows={12} value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })} className="journal-handwriting w-full resize-none rounded-2xl border border-ink/10 bg-white/75 p-5 text-2xl leading-[2rem] text-ink/76"/> : <p className="journal-handwriting whitespace-pre-wrap text-2xl leading-[2rem] text-ink/76">{entry.note || '这一站没有留下文字，但照片已经替我记住了当时的光。'}</p>}</section>
   </article></div></main>;
 }
 

@@ -14,8 +14,9 @@ describe('routes and accessibility', () => {
     expect(screen.getByLabelText('开始日期')).toBeInTheDocument();
     planner.unmount();
     const journal = renderRoute('/journal');
-    expect(screen.getByRole('heading', { name: '把一路山水，写成自己的湖北故事' })).toBeInTheDocument();
-    expect(screen.getByText('还没有真实记录，先在右侧写下第一站。')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '我的旅行路线手账' })).toBeInTheDocument();
+    expect(screen.getByRole('main', { name: '旅行手账地图' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '记下这一刻' })).toBeInTheDocument();
     journal.unmount();
     renderRoute('/about');
     expect(screen.getByRole('heading', { name: '系统架构图' })).toBeInTheDocument();

@@ -74,10 +74,8 @@ body {
 
 .itinerary-paper {
   background-color: #fffdf6;
-  background-image:
-    linear-gradient(90deg, transparent 0, transparent 43px, rgba(211, 82, 54, .16) 43px, rgba(211, 82, 54, .16) 45px, transparent 45px),
-    repeating-linear-gradient(to bottom, transparent 0, transparent 35px, rgba(14, 107, 114, .13) 36px);
-  background-position: 0 0, 0 16px;
+  background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 35px, rgba(14, 107, 114, .13) 36px);
+  background-position: 0 16px;
 }
 
 .itinerary-paper::after {
@@ -222,6 +220,89 @@ body {
   background: transparent;
 }
 
+.amap-journal-card {
+  display: flex;
+  width: 178px;
+  min-height: 82px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.82);
+  border-radius: 16px;
+  background: rgba(255,253,247,.93);
+  color: #12222a;
+  box-shadow: 0 14px 34px rgba(18,34,42,.2);
+  backdrop-filter: blur(14px);
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+}
+
+.amap-journal-card:hover,
+.amap-journal-card.is-selected {
+  transform: translateY(-4px) scale(1.03);
+  border-color: rgba(211,82,54,.7);
+  box-shadow: 0 20px 44px rgba(18,34,42,.28), 0 0 0 4px rgba(211,82,54,.12);
+}
+
+.amap-journal-card > img,
+.amap-journal-card-empty {
+  width: 62px;
+  min-height: 82px;
+  flex: 0 0 62px;
+  object-fit: cover;
+}
+
+.amap-journal-card-empty {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(145deg, rgba(14,107,114,.18), rgba(47,185,142,.08));
+  color: #0e6b72;
+  font-family: "STKaiti", "KaiTi", serif;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.amap-journal-card-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  padding: 9px 10px 8px;
+}
+
+.amap-journal-card-copy b {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.amap-journal-card-copy em {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  color: rgba(18,34,42,.66);
+  font-family: "STKaiti", "KaiTi", serif;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 16px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.amap-journal-card-copy small {
+  margin-top: auto;
+  color: #d35236;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+@media (max-width: 767px) {
+  .amap-journal-card { width: 132px; min-height: 68px; }
+  .amap-journal-card > img,
+  .amap-journal-card-empty { width: 44px; min-height: 68px; flex-basis: 44px; }
+  .amap-journal-card-copy { padding: 7px; }
+  .amap-journal-card-copy em { -webkit-line-clamp: 1; }
+  .amap-journal-card-copy small { display: none; }
+}
+
 .amap-route-name {
   display: inline-flex;
   max-width: 112px;
@@ -240,6 +321,139 @@ body {
 
 .map-workspace { width: calc(100vw - 3rem); margin-left: calc((min(100vw - 3rem, 1280px) - 100%) / -2); }
 .sidebar-scroll { scrollbar-width: thin; scrollbar-color: rgba(14,107,114,.35) transparent; }
+
+.workspace-tab-shell {
+  background:
+    radial-gradient(circle at 50% 12%, rgba(47, 185, 142, .2), transparent 34%),
+    linear-gradient(180deg, rgba(11, 34, 42, .92), rgba(8, 28, 36, .86));
+  box-shadow: inset -1px 0 rgba(255, 255, 255, .09), inset 0 1px rgba(255, 255, 255, .08);
+  backdrop-filter: blur(24px) saturate(145%);
+  scrollbar-width: none;
+}
+
+.workspace-tab-shell::-webkit-scrollbar { display: none; }
+
+.workspace-detail-glass {
+  position: relative;
+  isolation: isolate;
+  border-left: 1px solid rgba(255,255,255,.7);
+  background:
+    radial-gradient(circle at 92% 5%, rgba(47,185,142,.2), transparent 30%),
+    radial-gradient(circle at 4% 92%, rgba(211,82,54,.11), transparent 34%),
+    linear-gradient(145deg, rgba(255,255,255,.76), rgba(243,249,245,.58));
+  box-shadow: inset 1px 0 0 rgba(255,255,255,.8), inset 0 1px 0 rgba(255,255,255,.7);
+  backdrop-filter: blur(24px) saturate(1.25);
+}
+
+.workspace-detail-glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: .48;
+  background-image:
+    linear-gradient(rgba(14,107,114,.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(14,107,114,.035) 1px, transparent 1px);
+  background-size: 26px 26px;
+  mask-image: linear-gradient(to bottom, #000, transparent 78%);
+}
+
+.workspace-detail-glass article,
+.workspace-detail-glass label.rounded-2xl,
+.workspace-detail-glass section:not(.workspace-dark-glass) {
+  border-color: rgba(255,255,255,.72) !important;
+  box-shadow: 0 12px 30px rgba(18,34,42,.07), inset 0 1px 0 rgba(255,255,255,.72);
+  backdrop-filter: blur(14px) saturate(1.12);
+}
+
+.workspace-detail-glass article,
+.workspace-detail-glass label.rounded-2xl {
+  background-color: rgba(255,255,255,.68) !important;
+}
+
+.workspace-dark-glass {
+  border: 1px solid rgba(255,255,255,.16);
+  background:
+    radial-gradient(circle at 88% 4%, rgba(47,185,142,.22), transparent 32%),
+    linear-gradient(145deg, rgba(18,34,42,.94), rgba(13,53,61,.86));
+  box-shadow: 0 18px 44px rgba(18,34,42,.2), inset 0 1px 0 rgba(255,255,255,.13);
+  backdrop-filter: blur(18px) saturate(1.18);
+}
+
+.workspace-tab-track {
+  position: relative;
+  display: grid;
+  width: max-content;
+  grid-template-columns: repeat(7, 80px);
+  grid-template-rows: 46px;
+  gap: .5rem;
+}
+
+.workspace-tab-indicator {
+  --tab-index: 0;
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  left: 0;
+  width: 80px;
+  height: 46px;
+  border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: 1rem;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, .22), rgba(255, 255, 255, .07)),
+    rgba(14, 107, 114, .38);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .18), inset 0 1px rgba(255, 255, 255, .32), 0 0 0 1px rgba(47, 185, 142, .12);
+  backdrop-filter: blur(16px) saturate(165%);
+  transform: translate3d(calc(var(--tab-index) * 88px), 0, 0);
+  transition: transform .46s cubic-bezier(.22, 1, .36, 1), box-shadow .3s ease;
+  pointer-events: none;
+}
+
+.workspace-tab-button {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: .45rem;
+  border-radius: 1rem;
+  padding: .5rem .55rem;
+  color: rgba(255, 255, 255, .58);
+  font-size: .75rem;
+  font-weight: 900;
+  transition: color .28s ease, transform .28s ease, text-shadow .28s ease;
+}
+
+.workspace-tab-button:hover { color: rgba(255, 255, 255, .88); }
+.workspace-tab-button.is-active { color: #fff; text-shadow: 0 1px 12px rgba(255, 255, 255, .28); }
+.workspace-tab-button:active { transform: scale(.96); }
+
+@media (min-width: 1024px) {
+  .workspace-tab-track {
+    width: 100%;
+    grid-template-columns: 1fr;
+    grid-template-rows: repeat(7, 60px);
+  }
+
+  .workspace-tab-indicator {
+    width: 100%;
+    height: 60px;
+    transform: translate3d(0, calc(var(--tab-index) * 68px), 0);
+  }
+
+  .workspace-tab-button {
+    flex-direction: column;
+    gap: .25rem;
+    padding: .45rem .25rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-tab-indicator,
+  .workspace-tab-button { transition: none; }
+}
 
 @media (max-width: 1023px) {
   .map-workspace { width: 100%; margin-left: 0; }

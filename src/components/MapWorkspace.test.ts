@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
+import { baseRoutes } from '../data/routeData';
 import { getDianpingSearchUrl, getHourlyChartScale, getPointServiceLinks } from './MapWorkspace';
 
 describe('getPointServiceLinks', () => {
+  it('assigns every planned stop its own traceable representative cover', () => {
+    for (const route of Object.values(baseRoutes)) {
+      const covers = route.points.map((point) => point.imageUrl);
+      expect(covers.every(Boolean), route.city).toBe(true);
+      expect(new Set(covers).size, `${route.city} route covers`).toBe(route.points.length);
+      for (const point of route.points) {
+        expect(point.imageCredit?.sourceUrl, `${route.city} / ${point.name}`).toContain('commons.wikimedia.org/wiki/File:');
+      }
+    }
+  });
+
   it('routes railway stations to official 12306 services', () => {
     const links = getPointServiceLinks({ name: '宜昌东站', city: '宜昌', type: 'start' });
 
@@ -15,10 +27,28 @@ describe('getPointServiceLinks', () => {
     const links = getPointServiceLinks({ name: '坛子岭观景台', city: '宜昌', type: 'scenic' });
 
     expect(links.kind).toBe('attraction');
-    expect(links.detailUrl).toContain('you.ctrip.com');
+    expect(links.detailUrl).toBe('https://you.ctrip.com/sight/yichang313/46345.html');
     expect(links.bookingUrl).toContain('m.ctrip.com');
-    expect(links.detailUrl).toContain(encodeURIComponent('宜昌 坛子岭观景台'));
     expect(links.bookingUrl).toContain(encodeURIComponent('宜昌 坛子岭观景台'));
+  });
+
+  it('uses the verified Ctrip detail page for the Three Gorges visitor center', () => {
+    const links = getPointServiceLinks({ name: '三峡游客中心', city: '宜昌', type: 'rest' });
+
+    expect(links.detailUrl).toBe('https://you.ctrip.com/traffic/yichang313/g51289164.html');
+    expect(links.bookingUrl).toContain(encodeURIComponent('宜昌 三峡游客中心'));
+  });
+
+  it('binds every planned route point to a direct Ctrip page instead of the retired search route', () => {
+    for (const route of Object.values(baseRoutes)) {
+      for (const point of route.points) {
+        const links = getPointServiceLinks(point);
+        expect(links.detailUrl, `${point.city} / ${point.name}`).toContain('you.ctrip.com/');
+        expect(links.detailUrl, `${point.city} / ${point.name}`).not.toContain('/searchsite/');
+        expect(links.bookingUrl, `${point.city} / ${point.name}`).toContain('m.ctrip.com/');
+        expect(links.bookingUrl, `${point.city} / ${point.name}`).toContain(encodeURIComponent(`${point.city} ${point.name}`));
+      }
+    }
   });
 });
 

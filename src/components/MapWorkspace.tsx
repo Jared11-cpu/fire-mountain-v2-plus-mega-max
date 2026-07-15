@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { AlertTriangle, Bus, CalendarDays, Camera, CarFront, Check, ChevronDown, CircleDollarSign, Clock3, CloudRain, CloudSun, Copy, Droplets, ExternalLink, Footprints, Loader2, MapPin, Navigation, NotebookPen, PencilLine, Plus, ReceiptText, RefreshCw, Route as RouteIcon, Sparkles, Sun, Sunrise, Sunset, TrainFront, Trash2, Umbrella, Utensils, WalletCards, Wifi, WifiOff, Wind } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Bus, CalendarDays, Camera, CarFront, Check, ChevronDown, CircleDollarSign, Clock3, CloudRain, CloudSun, Droplets, ExternalLink, Footprints, ImagePlus, Loader2, MapPin, Navigation, NotebookPen, PencilLine, Plus, ReceiptText, RefreshCw, Route as RouteIcon, Sparkles, Sun, Sunrise, Sunset, TrainFront, Trash2, Umbrella, Utensils, WalletCards, Wifi, WifiOff, Wind } from 'lucide-react';
 import type { TravelPlan } from '../utils/aiGenerator';
-import type { RoutePoint, SmartRoute } from '../types/route';
+import type { JournalEntry, RoutePoint, SmartRoute } from '../types/route';
 import { budgetTotal, calculateTimeline, parseLocalDate, type BudgetItem, type PlannedRoutePoint, type TripRequest } from '../domain/trip';
 import { useTrip } from '../state/tripStore';
 import { resolveTransportPlan, toTransportPlanRequest, type TransportMode, type TransportPlanResponse } from '../services/transportService';
-import type { RoadPlanMetrics } from '../services/amapDriving';
+import { compressPhoto, deletePhoto, savePhoto } from '../services/journalStorage';
 import { RouteMap } from './RouteMap';
 
 type Tab = 'overview' | 'stops' | 'days' | 'weather' | 'transport' | 'food' | 'budget';
@@ -16,15 +16,14 @@ const tabs: Array<{ id: Tab; label: string; icon: typeof MapPin }> = [
   { id: 'budget', label: '预算', icon: CircleDollarSign },
 ];
 
-export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, navigating, imageUrl, onSelectPoint, onRegenerate, onCopySocial, onSimulateNavigation }: {
+export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, navigating, imageUrl, onSelectPoint, onRegenerate, onSimulateNavigation }: {
   route: SmartRoute; plan: TravelPlan; selectedPointId?: string; activePointIndex: number; navigating: boolean; imageUrl: string;
-  onSelectPoint: (point: RoutePoint) => void; onRegenerate?: () => void; onCopySocial?: () => void; onSimulateNavigation?: () => void;
+  onSelectPoint: (point: RoutePoint) => void; onRegenerate?: () => void; onSimulateNavigation?: () => void;
 }) {
-  const { plan: tripPlan, request, isReplanning, patchPlan, updatePlanSettings, updateBudgetItems, setBudgetTotal, updateRequest } = useTrip();
+  const { plan: tripPlan, request, journalEntries, isReplanning, patchPlan, updatePlanSettings, updateBudgetItems, setBudgetTotal, setJournalEntries, updateRequest, notify } = useTrip();
   const [tab, setTab] = useState<Tab>('overview');
   const [mobilePane, setMobilePane] = useState<'map' | 'details'>('map');
-  const [roadPlan, setRoadPlan] = useState<RoadPlanMetrics>({ status: 'loading', source: 'estimate', message: '正在请求高德道路规划…' });
-  const selected = route.points.find((point) => point.id === selectedPointId) as PlannedRoutePoint | undefined ?? route.points[0] as PlannedRoutePoint;
+  const activeTabIndex = tabs.findIndex((item) => item.id === tab);
   const handleMapSelect = (point: RoutePoint) => { onSelectPoint(point); setTab('stops'); setMobilePane('details'); };
   const patchRoutePoint = (id: string, changes: Partial<PlannedRoutePoint>) => patchPlan((value) => {
     const source: PlannedRoutePoint[] = (value.route.points as PlannedRoutePoint[]).map((point) => point.id === id ? { ...point, ...changes } as PlannedRoutePoint : point);
@@ -40,6 +39,21 @@ export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, n
       },
     };
   });
+  const updateRouteDistance = (totalDistanceKm: number) => patchPlan((value) => ({
+    ...value,
+    route: { ...value.route, totalDistanceKm },
+  }));
+  const updateFinalArrival = (arrivalTime: string) => patchPlan((value) => {
+    const points = value.route.points as PlannedRoutePoint[];
+    const finalIndex = points.length - 1;
+    return {
+      ...value,
+      route: {
+        ...value.route,
+        points: points.map((point, index) => index === finalIndex ? { ...point, time: arrivalTime, arrivalTime } : point),
+      },
+    };
+  });
   if (!tripPlan) return null;
 
   return <section className="overflow-hidden rounded-[2rem] border border-ink/10 bg-white shadow-soft">
@@ -47,29 +61,25 @@ export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, n
       <div className="grid grid-cols-2 rounded-full bg-white/10 p-1">{(['map', 'details'] as const).map((pane) => <button key={pane} type="button" role="tab" aria-selected={mobilePane === pane} onClick={() => setMobilePane(pane)} className={`rounded-full px-4 py-2 text-sm font-black ${mobilePane === pane ? 'bg-white text-ink' : 'text-white'}`}>{pane === 'map' ? '地图' : '详情'}</button>)}</div>
     </div>
     <div className="grid lg:h-[760px] lg:grid-cols-[72px_minmax(0,1fr)_420px]">
-      <nav className={`${mobilePane === 'details' ? 'flex' : 'hidden'} gap-2 overflow-x-auto bg-ink p-2 text-white lg:flex lg:flex-col lg:justify-center`} aria-label="方案详情标签">
-        {tabs.map(({ id, label, icon: Icon }) => <button key={id} type="button" aria-pressed={tab === id} aria-label={label} onClick={() => { setTab(id); setMobilePane('details'); }} className={`flex shrink-0 items-center gap-2 rounded-2xl px-3 py-2 text-xs font-black lg:flex-col lg:px-2 ${tab === id ? 'bg-river text-white' : 'text-white/65 hover:bg-white/10'}`}><Icon className="h-5 w-5" /><span>{label}</span></button>)}
+      <nav className={`${mobilePane === 'details' ? 'flex' : 'hidden'} workspace-tab-shell overflow-x-auto p-2 text-white lg:flex lg:items-center lg:overflow-visible`} aria-label="方案详情标签" role="tablist">
+        <div className="workspace-tab-track">
+          <span aria-hidden="true" className="workspace-tab-indicator" style={{ '--tab-index': activeTabIndex } as CSSProperties} />
+          {tabs.map(({ id, label, icon: Icon }) => <button key={id} type="button" role="tab" aria-selected={tab === id} aria-label={label} onClick={() => { setTab(id); setMobilePane('details'); }} className={`workspace-tab-button ${tab === id ? 'is-active' : ''}`}><Icon className="h-5 w-5" /><span>{label}</span></button>)}
+        </div>
       </nav>
 
       <div role="region" aria-label="路线地图" className={`${mobilePane === 'map' ? 'block' : 'hidden'} relative min-h-[620px] min-w-0 overflow-hidden border-ink/10 lg:block lg:border-r`}>
         <div className="absolute left-4 top-4 z-20 flex flex-wrap gap-2">
           <CommandButton icon={isReplanning ? Loader2 : RefreshCw} label={isReplanning ? '计算中' : '重新规划'} disabled={isReplanning} onClick={onRegenerate} spin={isReplanning} />
-          <CommandButton icon={Copy} label="复制文案" onClick={onCopySocial} />
         </div>
-        <RouteMap route={route} selectedPointId={selectedPointId} activePointIndex={activePointIndex} navigating={navigating} onSelectPoint={handleMapSelect} onRoadPlanChange={setRoadPlan} mapOnly />
-        <div role="region" aria-label="地图行程摘要" className={`pointer-events-none absolute bottom-4 left-4 right-4 z-20 grid gap-2 ${roadPlan.status === 'planned' ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
-          <Metric tone="river" label={roadPlan.status === 'planned' ? '高德 Driving 距离' : '估算距离'} value={roadPlan.status === 'loading' ? '计算中…' : `${(roadPlan.distanceKm ?? route.totalDistanceKm).toFixed(1)} km`} />
-          {roadPlan.status === 'planned' && roadPlan.durationMinutes && <Metric tone="jade" label="预计行车" value={formatDriveDuration(roadPlan.durationMinutes)} />}
-          <Metric tone="tower" label="出发时间" value={tripPlan.settings.departureTime} />
-          <Metric label="当前点到达" value={selected?.arrivalTime ?? selected?.time ?? '--:--'} />
-        </div>
+        <RouteMap route={route} selectedPointId={selectedPointId} activePointIndex={activePointIndex} navigating={navigating} onSelectPoint={handleMapSelect} mapOnly />
       </div>
 
-      <aside aria-label="方案详情" className={`${mobilePane === 'details' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-col overflow-hidden bg-[#fffdf7] lg:flex`}>
+      <aside aria-label="方案详情" className={`${mobilePane === 'details' ? 'flex' : 'hidden'} workspace-detail-glass min-h-0 min-w-0 flex-col overflow-hidden lg:flex`}>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 [scrollbar-gutter:stable]">
-          {tab === 'overview' && <Overview plan={tripPlan} route={route} summary={plan.summary} onSettings={updatePlanSettings} onBudget={setBudgetTotal} onDate={(startDate) => updateRequest({ startDate })} />}
+          {tab === 'overview' && <Overview plan={tripPlan} route={route} summary={plan.summary} onSettings={updatePlanSettings} onBudget={setBudgetTotal} onDistance={updateRouteDistance} onArrival={updateFinalArrival} onDate={(startDate) => updateRequest({ startDate })} />}
           {tab === 'stops' && <Stops points={route.points as PlannedRoutePoint[]} selectedId={selectedPointId} fallbackImageUrl={imageUrl} dailyRecords={tripPlan.dailyRecords} maxDays={request.days} onSelect={onSelectPoint} onPatchPoint={patchRoutePoint} onPatchNote={(id, note) => patchPlan((value) => ({ ...value, pointNotes: { ...value.pointNotes, [id]: note } }))} notes={tripPlan.pointNotes} />}
-          {tab === 'days' && <Days plan={tripPlan} onPatch={patchPlan} />}
+          {tab === 'days' && <Days plan={tripPlan} entries={journalEntries} onPatch={patchPlan} onEntries={setJournalEntries} onNotify={notify} />}
           {tab === 'weather' && <Weather request={request} lat={route.points[0]?.lat} lng={route.points[0]?.lng} />}
           {tab === 'transport' && <Transport plan={tripPlan} request={request} onSimulate={onSimulateNavigation} />}
           {tab === 'food' && <Food plan={tripPlan} />}
@@ -80,21 +90,19 @@ export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, n
   </section>;
 }
 
-function Overview({ plan, route, summary, onSettings, onBudget, onDate }: { plan: NonNullable<ReturnType<typeof useTrip>['plan']>; route: SmartRoute; summary: string; onSettings: ReturnType<typeof useTrip>['updatePlanSettings']; onBudget: (total: number) => void; onDate: (date: string) => void }) {
+function Overview({ plan, route, summary, onSettings, onBudget, onDistance, onArrival, onDate }: { plan: NonNullable<ReturnType<typeof useTrip>['plan']>; route: SmartRoute; summary: string; onSettings: ReturnType<typeof useTrip>['updatePlanSettings']; onBudget: (total: number) => void; onDistance: (distance: number) => void; onArrival: (time: string) => void; onDate: (date: string) => void }) {
+  const finalPoint = plan.route.points[plan.route.points.length - 1] as PlannedRoutePoint | undefined;
   return <div className="space-y-4">
-    <section className="rounded-[1.65rem] bg-ink p-5 text-white"><div className="text-[10px] font-black uppercase tracking-[0.2em] text-jade">已保存方案 · 自动同步</div><h3 className="mt-2 font-display text-2xl font-black leading-tight">{route.title}</h3><p className="mt-3 text-sm leading-6 text-white/65">{summary}</p></section>
+    <section className="workspace-dark-glass rounded-[1.65rem] p-5 text-white"><div className="text-[10px] font-black uppercase tracking-[0.2em] text-jade">已保存方案 · 自动同步</div><h3 className="mt-2 font-display text-2xl font-black leading-tight">{route.title}</h3><p className="mt-3 text-sm leading-6 text-white/65">{summary}</p></section>
     <div className="flex items-end justify-between gap-3"><div><h4 className="font-display text-2xl font-black">路线总览</h4><p className="mt-1 text-xs font-bold text-ink/45">点击卡片中的数字或日期即可直接修改</p></div><span className="rounded-full bg-jade/10 px-3 py-1 text-[10px] font-black text-jade">自动保存</span></div>
     <div className="grid grid-cols-2 gap-3">
       <EditableMetric label="点位" value={plan.settings.targetPointCount} min={2} max={plan.route.points.length} suffix="个" onCommit={(value) => onSettings({ targetPointCount: value })} />
       <EditableMetric label="预计时长" value={Math.round(plan.settings.targetDurationMinutes / 6) / 10} min={1} max={24} step={0.5} suffix="小时" onCommit={(value) => onSettings({ targetDurationMinutes: Math.round(value * 60) })} />
+      <EditableMetric label="路线距离" value={plan.route.totalDistanceKm} min={0} max={99999} step={0.1} suffix="km" onCommit={onDistance} />
       <EditableMetric label="预算总计" value={budgetTotal(plan.budgetItems)} min={0} max={999999} prefix="¥" onCommit={onBudget} />
-      <section aria-label="总览出发安排" className="rounded-2xl bg-white p-4 shadow-sm transition focus-within:ring-4 focus-within:ring-jade/15">
-        <span className="block text-xs font-black text-ink/50">出发安排</span>
-        <div className="mt-2 grid gap-2">
-          <label className="flex items-center gap-2 rounded-xl bg-ink/[0.035] px-2.5 py-2"><CalendarDays className="h-4 w-4 shrink-0 text-river" /><span className="sr-only">出发日期</span><input aria-label="总览出发日期" type="date" value={plan.requestSnapshot.startDate} onChange={(event) => onDate(event.target.value)} className="focus-ring min-w-0 w-full bg-transparent text-xs font-black text-ink" /></label>
-          <label className="flex items-center gap-2 rounded-xl bg-ink/[0.035] px-2.5 py-2"><Clock3 className="h-4 w-4 shrink-0 text-tower" /><span className="sr-only">出发时间</span><input aria-label="总览出发时间" type="time" value={plan.settings.departureTime} onChange={(event) => onSettings({ departureTime: event.target.value })} className="focus-ring min-w-0 w-full bg-transparent font-display text-base font-black text-ink" /></label>
-        </div>
-      </section>
+      <TimeMetric label="出发时间" value={plan.settings.departureTime} tone="tower" onChange={(value) => onSettings({ departureTime: value })} />
+      <TimeMetric label="到达时间" value={finalPoint?.arrivalTime ?? finalPoint?.time ?? ''} tone="river" onChange={onArrival} />
+      <label className="col-span-2 rounded-2xl bg-white p-4 shadow-sm transition focus-within:ring-4 focus-within:ring-jade/15"><span className="block text-xs font-black text-ink/50">出发日期</span><span className="mt-2 flex items-center gap-2 rounded-xl bg-ink/[0.035] px-2.5 py-2"><CalendarDays className="h-4 w-4 shrink-0 text-river" /><input aria-label="总览出发日期" type="date" value={plan.requestSnapshot.startDate} onChange={(event) => onDate(event.target.value)} className="focus-ring min-w-0 w-full bg-transparent text-sm font-black text-ink" /></span></label>
     </div>
   </div>;
 }
@@ -102,7 +110,7 @@ function Overview({ plan, route, summary, onSettings, onBudget, onDate }: { plan
 function Stops({ points, selectedId, fallbackImageUrl, dailyRecords, maxDays, onSelect, onPatchPoint, notes, onPatchNote }: { points: PlannedRoutePoint[]; selectedId?: string; fallbackImageUrl: string; dailyRecords: Array<{ day: number; date: string }>; maxDays: number; onSelect: (point: RoutePoint) => void; onPatchPoint: (id: string, changes: Partial<PlannedRoutePoint>) => void; notes: Record<string, string>; onPatchNote: (id: string, note: string) => void }) {
   const [expandedId, setExpandedId] = useState<string | null>(selectedId ?? points[0]?.id ?? null);
   useEffect(() => { if (selectedId) setExpandedId(selectedId); }, [selectedId]);
-  return <div className="space-y-4"><div><h4 className="font-display text-2xl font-black">地点安排</h4><p className="mt-1 text-xs font-bold leading-5 text-ink/50">展开地点卡片查看实景、游览重点与个人安排；修改内容会自动保存。</p></div>{points.map((point, index) => { const expanded = expandedId === point.id; const date = dailyRecords.find((record) => record.day === (point.day ?? 1))?.date; const serviceLinks = getPointServiceLinks(point); return <article key={point.id} className={`overflow-hidden rounded-[1.65rem] border bg-white transition ${selectedId === point.id ? 'border-river shadow-[0_12px_35px_rgba(14,116,128,.14)]' : 'border-ink/10 shadow-sm'}`}>
+  return <div className="space-y-4"><h4 className="font-display text-2xl font-black">地点安排</h4>{points.map((point, index) => { const expanded = expandedId === point.id; const date = dailyRecords.find((record) => record.day === (point.day ?? 1))?.date; const serviceLinks = getPointServiceLinks(point); return <article key={point.id} className={`overflow-hidden rounded-[1.65rem] border bg-white transition ${selectedId === point.id ? 'border-river shadow-[0_12px_35px_rgba(14,116,128,.14)]' : 'border-ink/10 shadow-sm'}`}>
       <button type="button" aria-expanded={expanded} onClick={() => { setExpandedId(expanded ? null : point.id); onSelect(point); }} className="group relative block h-36 w-full overflow-hidden text-left">
         <img src={point.imageUrl ?? fallbackImageUrl} alt={`${point.name}地点照片`} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.035]" />
         <span className="absolute inset-0 bg-gradient-to-t from-ink/95 via-ink/20 to-transparent" />
@@ -128,18 +136,62 @@ type PointServiceLinkSet = {
   bookingUrl: string;
 };
 
+const CTRIP_DETAIL_URLS: Readonly<Record<string, string>> = {
+  // 携程旧版 searchsite/sight 深链会返回 432 或空白页；路线点位逐一绑定已核验页面。
+  三峡游客中心: 'https://you.ctrip.com/traffic/yichang313/g51289164.html',
+  坛子岭观景台: 'https://you.ctrip.com/sight/yichang313/46345.html',
+  '185 平台': 'https://you.ctrip.com/sight/yichang313/1508935.html',
+  西坝不夜城: 'https://you.ctrip.com/sight/yichang313/151629835.html',
+  滨江公园夜景: 'https://you.ctrip.com/sight/yichang313/51550.html',
+  昙华林: 'https://you.ctrip.com/sight/wuhan145/119307.html',
+  黄鹤楼红墙: 'https://you.ctrip.com/sight/wuhan145/8979.html',
+  粮道街: 'https://you.ctrip.com/sight/wuhan145/71454382.html',
+  江汉关: 'https://you.ctrip.com/sight/wuhan145/1489369.html',
+  汉口江滩日落: 'https://you.ctrip.com/sight/wuhan145/119534.html',
+  女儿城: 'https://you.ctrip.com/sight/enshicity1446196/1414339.html',
+  恩施大峡谷游客中心: 'https://you.ctrip.com/sight/enshigrandcanyon2128618.html',
+  七星寨栈道: 'https://you.ctrip.com/sight/enshicity1446196/1714425.html',
+  云龙地缝瀑布: 'https://you.ctrip.com/sight/enshicity1446196/4379383.html',
+  峡谷民宿观景台: 'https://you.ctrip.com/sight/enshigrandcanyon2128618.html',
+  荆州博物馆: 'https://you.ctrip.com/sight/jingzhou413/134921.html',
+  宾阳楼: 'https://you.ctrip.com/sight/jingzhou413/5073085.html',
+  早堂面老店: 'https://you.ctrip.com/food/jingzhou413.html',
+  古城墙步道: 'https://you.ctrip.com/sight/jingzhou413/52023.html',
+  沙市洋码头: 'https://you.ctrip.com/place/jingzhou413.html',
+  襄阳古城北街: 'https://you.ctrip.com/sight/xiangyang414/5716122.html',
+  古隆中: 'https://you.ctrip.com/sight/xiangyang414/48889.html',
+  襄阳牛肉面: 'https://you.ctrip.com/food/xiangyang414.html',
+  唐城影视基地: 'https://you.ctrip.com/sight/xiangyang414/1699843.html',
+  汉江桥畔: 'https://you.ctrip.com/sight/xiangyang414/1834681.html',
+  黄石国家矿山公园: 'https://you.ctrip.com/sight/huangshi710/141134.html',
+  矿冶主题展区: 'https://you.ctrip.com/sight/huangshi710/141134.html',
+  磁湖岸线: 'https://you.ctrip.com/sight/huangshi710/52097.html',
+  黄石港饼老店: 'https://you.ctrip.com/food/huangshi710.html',
+  团城山公园: 'https://you.ctrip.com/sight/huangshi710/52097.html',
+};
+
+const CTRIP_CITY_GUIDES: Readonly<Record<string, string>> = {
+  宜昌: 'https://you.ctrip.com/place/yichang313.html',
+  武汉: 'https://you.ctrip.com/place/wuhan145.html',
+  恩施: 'https://you.ctrip.com/place/enshicity1446196.html',
+  荆州: 'https://you.ctrip.com/place/jingzhou413.html',
+  襄阳: 'https://you.ctrip.com/place/xiangyang414.html',
+  黄石: 'https://you.ctrip.com/place/huangshi710.html',
+};
+
 export function getPointServiceLinks(point: Pick<RoutePoint, 'name' | 'city' | 'type'>): PointServiceLinkSet {
   const keyword = encodeURIComponent(`${point.city} ${point.name}`);
   const isRailwayStation = point.type === 'start' && /(?:站|高铁站|火车站)$/.test(point.name.trim());
+  const ctripTicketSearchUrl = `https://m.ctrip.com/webapp/ticket/index.html#/dest/k-keyword-0/s-tickets?keyword=${keyword}`;
   return {
     kind: isRailwayStation ? 'railway' : 'attraction',
     amapUrl: `https://uri.amap.com/search?keyword=${keyword}&city=${encodeURIComponent(point.city)}`,
     detailUrl: isRailwayStation
       ? 'https://kyfw.12306.cn/mormhweb/czyd_2143/'
-      : `https://you.ctrip.com/searchsite/sight/?query=${keyword}`,
+      : CTRIP_DETAIL_URLS[point.name] ?? CTRIP_CITY_GUIDES[point.city] ?? 'https://you.ctrip.com/',
     bookingUrl: isRailwayStation
       ? 'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc'
-      : `https://m.ctrip.com/webapp/ticket/index.html#/dest/k-keyword-0/s-tickets?keyword=${keyword}`,
+      : ctripTicketSearchUrl,
   };
 }
 
@@ -160,27 +212,109 @@ function PointServiceLinks({ pointName, links }: { pointName: string; links: Poi
 function InfoTile({ icon: Icon, label, value }: { icon: typeof Clock3; label: string; value: string }) { return <div className="rounded-2xl bg-ink/[0.045] p-3"><Icon className="mb-2 h-4 w-4 text-river" /><span className="block text-[10px] text-ink/45">{label}</span><strong className="mt-0.5 block text-ink">{value}</strong></div>; }
 function formatCompactDate(value?: string) { if (!value) return '日期待定'; return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', weekday: 'short' }).format(parseLocalDate(value)); }
 
-function Days({ plan, onPatch }: { plan: NonNullable<ReturnType<typeof useTrip>['plan']>; onPatch: ReturnType<typeof useTrip>['patchPlan'] }) {
+function Days({ plan, entries, onPatch, onEntries, onNotify }: { plan: NonNullable<ReturnType<typeof useTrip>['plan']>; entries: JournalEntry[]; onPatch: ReturnType<typeof useTrip>['patchPlan']; onEntries: (entries: JournalEntry[]) => void; onNotify: ReturnType<typeof useTrip>['notify'] }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
-  const updatePoint = (pointId: string, changes: Partial<PlannedRoutePoint>) => onPatch((value) => ({ ...value, route: { ...value.route, points: (value.route.points as PlannedRoutePoint[]).map((point) => point.id === pointId ? { ...point, ...changes } : point) } }));
-  const updateTime = (pointId: string, nextTime: string) => onPatch((value) => {
-    const points = value.route.points as PlannedRoutePoint[];
-    const index = points.findIndex((point) => point.id === pointId);
-    if (index < 0) return value;
-    const target = points[index];
-    const delta = clockMinutes(nextTime) - clockMinutes(target.arrivalTime);
-    return { ...value, route: { ...value.route, points: points.map((point, pointIndex) => pointIndex >= index && point.day === target.day ? { ...point, arrivalTime: shiftClock(point.arrivalTime, delta), time: shiftClock(point.arrivalTime, delta) } : point) } };
-  });
+  const editingPoint = (plan.route.points as PlannedRoutePoint[]).find((point) => point.id === editingId);
+  const editingRecord = editingPoint ? plan.dailyRecords.find((record) => record.day === (editingPoint.day ?? 1)) : undefined;
+  const existingEntry = editingPoint ? entries.find((entry) => entry.pointId === editingPoint.id && entry.day === (editingPoint.day ?? 1)) : undefined;
+
   const togglePoint = (day: number, pointId: string, checked: boolean) => {
     onPatch((value) => ({ ...value, dailyRecords: value.dailyRecords.map((item) => item.day === day ? { ...item, checkedPointIds: checked ? item.checkedPointIds.filter((id) => id !== pointId) : [...item.checkedPointIds, pointId] } : item) }));
     if (!checked) { setCelebratingId(pointId); window.setTimeout(() => setCelebratingId((current) => current === pointId ? null : current), 900); }
   };
-  return <div className="space-y-5"><div className="flex items-end justify-between"><div><h4 className="font-display text-2xl font-black">每日记录</h4><p className="mt-1 text-xs font-bold text-ink/45">点击任务完成打卡，铅笔可修改时间与任务名称。</p></div><span className="rounded-full bg-jade/10 px-3 py-1 text-[10px] font-black text-jade">自动保存</span></div>{plan.dailyRecords.map((record) => { const points = plan.route.points.filter((point) => (point.day ?? 1) === record.day) as PlannedRoutePoint[]; const dateTitle = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }).format(parseLocalDate(record.date)); const completed = points.filter((point) => record.checkedPointIds.includes(point.id)).length; return <section key={record.day} className="itinerary-paper relative overflow-hidden rounded-[1.75rem] border border-ink/10 px-5 pb-5 pt-6 shadow-[0_14px_38px_rgba(18,34,42,.08)]">
-    <div className="relative z-10 mb-5 flex items-start justify-between border-b-2 border-ink/10 pb-4 pl-8"><div><span className="text-[10px] font-black uppercase tracking-[0.22em] text-tower">DAY {String(record.day).padStart(2, '0')}</span><h5 className="mt-1 font-display text-2xl font-black leading-none text-ink">{dateTitle}</h5><p className="mt-2 text-[11px] font-bold text-ink/40">{record.date}</p></div><div className="grid h-12 w-12 place-items-center rounded-full border border-river/15 bg-white/80 text-center shadow-sm"><strong className="text-sm text-river">{completed}/{points.length}</strong><span className="-mt-1 text-[8px] font-black text-ink/40">完成</span></div></div>
-    <div className="relative z-10 space-y-1 pl-8">{points.map((point) => { const checked = record.checkedPointIds.includes(point.id); const editing = editingId === point.id; return <div key={point.id} className="relative min-h-[52px] py-1">{celebratingId === point.id && <Confetti />}{editing ? <div className="grid grid-cols-[86px_1fr_36px] items-center gap-2 rounded-xl bg-white/90 p-2 shadow-sm"><label className="sr-only" htmlFor={`time-${point.id}`}>修改{point.name}时间</label><input id={`time-${point.id}`} aria-label={`修改${point.name}时间`} type="time" value={point.arrivalTime} onChange={(event) => updateTime(point.id, event.target.value)} className="focus-ring min-w-0 rounded-lg border border-ink/10 px-2 py-2 text-xs font-black text-river" /><label className="sr-only" htmlFor={`name-${point.id}`}>修改任务名称</label><input id={`name-${point.id}`} aria-label={`修改${point.name}任务`} value={point.name} onChange={(event) => updatePoint(point.id, { name: event.target.value })} className="focus-ring min-w-0 rounded-lg border border-ink/10 px-2 py-2 text-sm font-bold" /><button type="button" aria-label={`完成编辑${point.name}`} onClick={() => setEditingId(null)} className="grid h-9 w-9 place-items-center rounded-lg bg-jade text-white"><Check className="h-4 w-4" /></button></div> : <div className="group flex min-h-[46px] items-center gap-2"><button type="button" aria-pressed={checked} aria-label={`${checked ? '取消完成' : '完成'}${point.name}`} onClick={() => togglePoint(record.day, point.id, checked)} className={`flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-2 text-left transition ${checked ? 'text-ink/30' : 'hover:bg-white/60'}`}><span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 transition ${checked ? 'scale-110 border-jade bg-jade text-white' : 'border-river/30 bg-white text-transparent'}`}><Check className="h-3.5 w-3.5" /></span><span className={`w-12 shrink-0 font-display text-sm font-black ${checked ? 'text-ink/25' : 'text-river'}`}>{point.arrivalTime}</span><span className={`relative min-w-0 flex-1 font-bold transition after:absolute after:left-0 after:top-1/2 after:h-[2px] after:bg-tower after:transition-all ${checked ? 'text-ink/30 after:w-full' : 'after:w-0'}`}>{point.name}</span></button><button type="button" aria-label={`编辑${point.name}`} onClick={() => setEditingId(point.id)} className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-ink/35 transition hover:bg-river/10 hover:text-river"><PencilLine className="h-4 w-4" /></button></div>}</div>; })}</div>
-    <label className="relative z-10 mt-4 block pl-8 text-[11px] font-black text-ink/45">今日手记<textarea aria-label={`第${record.day}天手记`} value={record.note} placeholder="写下今天的天气、心情或临时调整……" onChange={(event) => onPatch((value) => ({ ...value, dailyRecords: value.dailyRecords.map((item) => item.day === record.day ? { ...item, note: event.target.value } : item) }))} rows={3} className="focus-ring mt-2 w-full resize-none rounded-2xl border border-ink/10 bg-white/55 px-4 py-3 font-medium leading-7 text-ink placeholder:text-ink/25" /></label>
-  </section>; })}</div>;
+
+  if (editingPoint && editingRecord) return <DailyTaskEditor key={editingPoint.id} point={editingPoint} record={editingRecord} entry={existingEntry} entries={entries} onBack={() => setEditingId(null)} onPatch={onPatch} onEntries={onEntries} onNotify={onNotify} />;
+
+  return <div className="space-y-5">
+    <div className="flex items-center justify-between gap-3"><h4 className="font-display text-3xl font-black">每日记录</h4><span className="rounded-full bg-jade/10 px-3 py-1 text-[11px] font-black text-jade">自动保存</span></div>
+    {plan.dailyRecords.map((record) => {
+      const points = plan.route.points.filter((point) => (point.day ?? 1) === record.day) as PlannedRoutePoint[];
+      const dateTitle = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }).format(parseLocalDate(record.date));
+      const completed = points.filter((point) => record.checkedPointIds.includes(point.id)).length;
+      return <section key={record.day} className="itinerary-paper relative overflow-hidden rounded-[1.75rem] border border-ink/10 px-5 pb-5 pt-6 shadow-[0_14px_38px_rgba(18,34,42,.08)]">
+        <div className="relative z-10 mb-4 flex items-start justify-between border-b-2 border-ink/10 pb-4"><div><span className="text-xs font-black uppercase tracking-[0.22em] text-tower">DAY {String(record.day).padStart(2, '0')}</span><h5 className="mt-1 font-display text-3xl font-black leading-none text-ink">{dateTitle}</h5><p className="mt-2 text-sm font-bold text-ink/40">{record.date}</p></div><div className="grid h-14 w-14 place-items-center rounded-full border border-river/15 bg-white/80 text-center shadow-sm"><strong className="text-base text-river">{completed}/{points.length}</strong><span className="-mt-1 text-[9px] font-black text-ink/40">完成</span></div></div>
+        <div className="relative z-10 space-y-1">{points.map((point) => { const checked = record.checkedPointIds.includes(point.id); return <div key={point.id} className="relative min-h-[58px] py-1">{celebratingId === point.id && <Confetti />}<div className="group flex min-h-[52px] items-center gap-2"><button type="button" aria-pressed={checked} aria-label={`${checked ? '取消完成' : '完成'}${point.name}`} onClick={() => togglePoint(record.day, point.id, checked)} className={`flex min-w-0 flex-1 items-center gap-3 rounded-xl px-1 py-2 text-left transition ${checked ? 'text-ink/30' : 'hover:bg-white/60'}`}><span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border-2 transition ${checked ? 'scale-110 border-jade bg-jade text-white' : 'border-river/30 bg-white text-transparent'}`}><Check className="h-4 w-4" /></span><span className={`w-14 shrink-0 font-display text-lg font-black ${checked ? 'text-ink/25' : 'text-river'}`}>{point.arrivalTime}</span><span className={`relative min-w-0 flex-1 text-base font-black transition after:absolute after:left-0 after:top-1/2 after:h-[2px] after:bg-tower after:transition-all ${checked ? 'text-ink/30 after:w-full' : 'after:w-0'}`}>{point.name}</span></button><button type="button" aria-label={`打开${point.name}详细编辑`} onClick={() => setEditingId(point.id)} className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-ink/40 transition hover:bg-river/10 hover:text-river"><PencilLine className="h-5 w-5" /></button></div></div>; })}</div>
+        <label className="relative z-10 mt-4 block text-sm font-black text-ink/50">今日手记<textarea aria-label={`第${record.day}天手记`} value={record.note} placeholder="写下今天的天气、心情或临时调整……" onChange={(event) => onPatch((value) => ({ ...value, dailyRecords: value.dailyRecords.map((item) => item.day === record.day ? { ...item, note: event.target.value } : item) }))} rows={3} className="focus-ring mt-2 w-full resize-none rounded-2xl border border-ink/10 bg-white/65 px-4 py-3 text-base font-medium leading-7 text-ink placeholder:text-ink/25" /></label>
+      </section>;
+    })}
+  </div>;
+}
+
+function DailyTaskEditor({ point, record, entry, entries, onBack, onPatch, onEntries, onNotify }: { point: PlannedRoutePoint; record: { day: number; date: string }; entry?: JournalEntry; entries: JournalEntry[]; onBack: () => void; onPatch: ReturnType<typeof useTrip>['patchPlan']; onEntries: (entries: JournalEntry[]) => void; onNotify: ReturnType<typeof useTrip>['notify'] }) {
+  const [draft, setDraft] = useState({ name: point.name, arrivalTime: point.arrivalTime, durationMinutes: point.durationMinutes, note: entry?.note ?? '' });
+  const [files, setFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const urls = files.map((file) => URL.createObjectURL(file));
+    setPreviews(urls);
+    return () => urls.forEach(URL.revokeObjectURL);
+  }, [files]);
+
+  const chooseFiles = (list: FileList | null) => {
+    if (!list) return;
+    const next = Array.from(list);
+    if ((entry?.photoIds.length ?? 0) + files.length + next.length > 6) { setError('每条记录最多保存 6 张照片。'); return; }
+    const oversized = next.find((file) => file.size > 10 * 1024 * 1024);
+    if (oversized) { setError(`${oversized.name} 超过 10MB 原图上限。`); return; }
+    setFiles((current) => [...current, ...next]);
+    setError('');
+  };
+
+  const save = async () => {
+    if (!draft.name.trim() || !draft.arrivalTime) { setError('请填写任务名称和时间。'); return; }
+    setSaving(true); setError('');
+    const photoIds: string[] = [];
+    try {
+      for (const file of files) photoIds.push(await savePhoto(await compressPhoto(file)));
+      onPatch((value) => {
+        const points = value.route.points as PlannedRoutePoint[];
+        const index = points.findIndex((item) => item.id === point.id);
+        const delta = clockMinutes(draft.arrivalTime) - clockMinutes(points[index]?.arrivalTime ?? point.arrivalTime);
+        const updatedPoints = points.map((item, pointIndex) => {
+          if (item.id === point.id) return { ...item, name: draft.name.trim(), durationMinutes: Math.max(10, draft.durationMinutes), stayMinutes: Math.max(10, draft.durationMinutes), arrivalTime: draft.arrivalTime, time: draft.arrivalTime };
+          if (pointIndex > index && item.day === point.day) return { ...item, arrivalTime: shiftClock(item.arrivalTime, delta), time: shiftClock(item.time, delta) };
+          return item;
+        });
+        return {
+          ...value,
+          route: { ...value.route, points: updatedPoints },
+          settings: { ...value.settings, targetDurationMinutes: updatedPoints.reduce((sum, item) => sum + item.durationMinutes + item.travelMinutesToNext, 0) },
+        };
+      });
+      const nextEntry: JournalEntry = {
+        id: entry?.id ?? crypto.randomUUID(), pointId: point.id, pointName: draft.name.trim(), city: point.city, day: record.day,
+        note: draft.note.trim(), visitedAt: record.date, lat: point.lat, lng: point.lng, photoIds: [...(entry?.photoIds ?? []), ...photoIds],
+      };
+      onEntries(entry ? entries.map((item) => item.id === entry.id ? nextEntry : item) : [nextEntry, ...entries]);
+      onNotify('日常记录已保存，并同步到旅行手账。', 'success');
+      onBack();
+    } catch (caught) {
+      await Promise.all(photoIds.map(deletePhoto));
+      const message = caught instanceof Error ? caught.message : '保存失败，请检查浏览器存储权限。';
+      setError(message); onNotify(message, 'error');
+    } finally { setSaving(false); }
+  };
+
+  return <div className="space-y-4">
+    <button type="button" onClick={onBack} className="inline-flex items-center gap-2 text-sm font-black text-river"><ArrowLeft className="h-4 w-4" />返回每日记录</button>
+    <section className="overflow-hidden rounded-[1.75rem] border border-ink/10 bg-white shadow-[0_18px_48px_rgba(18,34,42,.11)]">
+      <div className="relative h-36 overflow-hidden"><img src={point.imageUrl} alt={`${point.name}实景`} className="h-full w-full object-cover" /><div className="absolute inset-0 bg-gradient-to-t from-ink/90 to-transparent" /><div className="absolute bottom-4 left-4 text-white"><span className="text-xs font-black tracking-[.18em] text-jade">DAY {String(record.day).padStart(2, '0')} · 详细编辑</span><h4 className="mt-1 font-display text-3xl font-black">{draft.name || point.name}</h4></div></div>
+      <div className="space-y-4 p-5">
+        <div className="grid grid-cols-2 gap-3"><label className="col-span-2 text-sm font-black text-ink/55">任务名称<input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} className="focus-ring mt-1 w-full rounded-2xl border border-ink/10 px-4 py-3 text-lg font-black" /></label><label className="text-sm font-black text-ink/55">到达时间<input type="time" value={draft.arrivalTime} onChange={(event) => setDraft({ ...draft, arrivalTime: event.target.value })} className="focus-ring mt-1 w-full rounded-2xl border border-ink/10 px-3 py-3 text-lg font-black text-river" /></label><label className="text-sm font-black text-ink/55">停留分钟<input type="number" min={10} max={480} step={5} value={draft.durationMinutes} onChange={(event) => setDraft({ ...draft, durationMinutes: Number(event.target.value) || 10 })} className="focus-ring mt-1 w-full rounded-2xl border border-ink/10 px-3 py-3 text-lg font-black" /></label></div>
+        <label className="block text-sm font-black text-ink/55">当时的详细记录<textarea value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })} rows={5} placeholder="写下天气、心情、见闻或临时调整……" className="journal-handwriting focus-ring mt-1 w-full resize-none rounded-2xl border border-ink/10 px-4 py-3 text-lg leading-7" /></label>
+        <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-river/35 bg-river/[.04] px-4 py-4 font-black text-river"><ImagePlus className="h-5 w-5" />插入照片<input type="file" accept="image/*" multiple className="sr-only" onChange={(event) => { chooseFiles(event.target.files); event.currentTarget.value = ''; }} /></label>
+        {(entry?.photoIds.length ?? 0) > 0 && <p className="text-xs font-bold text-jade">旅行手账中已有 {entry?.photoIds.length} 张照片，本次保存将继续追加。</p>}
+        {previews.length > 0 && <div className="grid grid-cols-3 gap-2">{previews.map((url, index) => <div key={url} className="relative"><img src={url} alt={`待保存照片${index + 1}`} className="aspect-square w-full rounded-xl object-cover" /><button type="button" aria-label={`删除待保存照片${index + 1}`} onClick={() => setFiles((items) => items.filter((_, itemIndex) => itemIndex !== index))} className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-ink/80 text-xs font-black text-white">×</button></div>)}</div>}
+        <p className="rounded-2xl bg-ink/[.04] p-3 text-xs font-bold leading-5 text-ink/50">文字记录保存在应用状态，照片压缩后写入本机 IndexedDB；保存后会出现在“旅行手账”的真实足迹中。</p>
+        {error && <p role="alert" className="rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p>}
+        <button type="button" disabled={saving} onClick={save} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-5 py-4 text-base font-black text-white disabled:opacity-60">{saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Check className="h-5 w-5" />}{saving ? '正在保存照片…' : '保存并同步到旅行手账'}</button>
+      </div>
+    </section>
+  </div>;
 }
 
 function Confetti() { const colors = ['bg-tower', 'bg-jade', 'bg-river', 'bg-amber-400', 'bg-violet-500', 'bg-rose-400']; return <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-1/2 z-20">{colors.map((color, index) => <i key={color} className={`confetti-piece ${color}`} style={{ '--confetti-angle': `${index * 60}deg`, '--confetti-x': `${(index - 2.5) * 18}px` } as CSSProperties} />)}</span>; }
@@ -218,9 +352,9 @@ function Weather({ request, lat, lng }: { request: TripRequest; lat?: number; ln
   const refresh = () => { setWeather(null); setReloadVersion((value) => value + 1); };
   return <div className="space-y-4"><div className="flex items-end justify-between gap-3"><div><h4 className="font-display text-2xl font-black">出行天气</h4><p className="mt-1 text-xs font-bold leading-5 text-ink/45">把天气数据翻译成今天真正需要的出行准备。</p></div><button type="button" onClick={refresh} disabled={dataState === '请求中'} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white px-3 py-2 text-xs font-black text-river shadow-sm disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${dataState === '请求中' ? 'animate-spin' : ''}`}/>重新获取天气</button></div>{weather ? <>
     <section className="relative overflow-hidden rounded-[1.75rem] bg-gradient-to-br from-river via-[#127f8c] to-[#0a5964] p-5 text-white shadow-[0_18px_45px_rgba(14,107,114,.2)]"><Sun className="absolute -right-8 -top-8 h-36 w-36 text-white/10" /><div className="relative flex items-start justify-between"><div><span className="rounded-full bg-white/15 px-3 py-1 text-[10px] font-black backdrop-blur">{request.destinationCity} · {dataState}</span><div className="mt-4 flex items-end gap-3"><strong className="font-display text-6xl font-black leading-none">{Math.round(weather.temperature)}°</strong><div className="pb-1"><p className="text-sm font-black">{weatherLabel(weather.code)}</p><p className="mt-1 text-xs font-bold text-white/65">体感 {Math.round(weather.apparentTemperature)}°</p></div></div></div><div className="rounded-2xl bg-white/10 px-3 py-2 text-right text-xs font-bold backdrop-blur"><p>最高 {Math.round(today?.max ?? weather.temperature)}°</p><p className="mt-1 text-white/60">最低 {Math.round(today?.min ?? weather.temperature)}°</p></div></div><div className="relative mt-5 grid grid-cols-3 gap-2"><WeatherHeroMetric icon={Droplets} label="湿度" value={`${weather.humidity}%`} /><WeatherHeroMetric icon={Umbrella} label="降雨概率" value={`${today?.rainProbability ?? 0}%`} /><WeatherHeroMetric icon={Wind} label="阵风" value={`${Math.round(weather.windGusts)} km/h`} /></div></section>
-    <section className="rounded-[1.5rem] border border-tower/15 bg-[#fff8ed] p-4"><div className="flex items-center gap-2"><span className="grid h-9 w-9 place-items-center rounded-full bg-tower text-white"><Sparkles className="h-4 w-4" /></span><div><h5 className="font-black">结合行程的准备建议</h5><p className="text-[10px] font-bold text-ink/40">依据天气阈值与“{request.travelerType}”条件生成</p></div></div><ul className="mt-3 space-y-2">{advice.map((item) => <li key={item} className="flex gap-2 text-xs font-bold leading-5 text-ink/65"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-tower" />{item}</li>)}</ul></section>
+    <WeatherAdviceCard advice={advice} />
     <HourlyWeatherChart hours={weather.hourly} />
-    <section className="rounded-[1.5rem] bg-white p-4 shadow-sm"><h5 className="font-display text-lg font-black">行程期间</h5><div className="mt-3 space-y-3">{weather.daily.slice(0, Math.min(3, Math.max(1, request.days))).map((day, index) => <div key={day.date} className="grid grid-cols-[70px_1fr_auto] items-center gap-3 border-b border-ink/8 pb-3 last:border-0 last:pb-0"><div><strong className="text-xs">{index === 0 ? '今天' : `第${index + 1}天`}</strong><span className="mt-1 block text-[9px] font-bold text-ink/35">{day.date.slice(5).replace('-', '/')}</span></div><div><p className="text-xs font-black">{weatherLabel(day.code)}</p><p className="mt-1 text-[10px] font-bold text-ink/40">降雨 {day.rainProbability}% · UV {day.uv.toFixed(1)}</p></div><strong className="text-sm">{Math.round(day.min)}°–{Math.round(day.max)}°</strong></div>)}</div>{today && <div className="mt-4 grid grid-cols-2 gap-2"><MiniFact icon={Sunrise} label="日出" value={today.sunrise.slice(11, 16)} /><MiniFact icon={Sunset} label="日落" value={today.sunset.slice(11, 16)} /></div>}</section>
+    <TripForecastCard days={weather.daily.slice(0, Math.min(3, Math.max(1, request.days)))} today={today} />
   </> : <div className="rounded-[1.5rem] border border-dashed border-tower/35 bg-tower/5 p-5"><CloudRain className="h-7 w-7 text-tower" /><h5 className="mt-3 font-black">{dataState === '请求中' ? '正在取得天气数据' : '暂时无法取得天气数据'}</h5><p className="mt-2 text-xs font-bold leading-5 text-ink/55">{reason}</p>{dataState !== '请求中' && <button type="button" onClick={refresh} className="mt-4 inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-xs font-black text-white"><RefreshCw className="h-3.5 w-3.5"/>重新获取天气</button>}</div>}<section className="rounded-2xl border border-ink/8 bg-white/70 p-3 text-[10px] font-bold leading-5 text-ink/45"><p>数据源：<a className="font-black text-river underline" href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open‑Meteo Weather Forecast API</a></p><p>状态：{dataState} · 成功/缓存/超时/网络失败分别记录</p><p>最后成功更新时间：{weather ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'long', timeStyle: 'short', timeZone: 'Asia/Shanghai' }).format(new Date(weather.fetchedAt)) : '尚无成功记录'}</p><p>时区：Asia/Shanghai（UTC+8） · 预报可能变化，关键行程请临行复核。</p></section></div>;
 }
 
@@ -262,7 +396,24 @@ function HourlyWeatherChart({ hours }: { hours: WeatherHour[] }) {
 }
 
 function WeatherHeroMetric({ icon: Icon, label, value }: { icon: typeof Droplets; label: string; value: string }) { return <div className="rounded-2xl bg-white/10 p-2.5 backdrop-blur"><Icon className="h-4 w-4 text-white/70" /><span className="mt-2 block text-[9px] font-bold text-white/50">{label}</span><strong className="mt-0.5 block text-xs">{value}</strong></div>; }
-function MiniFact({ icon: Icon, label, value }: { icon: typeof Sunrise; label: string; value: string }) { return <div className="flex items-center gap-2 rounded-xl bg-ink/[0.035] p-2.5"><Icon className="h-4 w-4 text-tower" /><span className="text-[10px] font-bold text-ink/40">{label}</span><strong className="ml-auto text-xs">{value}</strong></div>; }
+function WeatherAdviceCard({ advice }: { advice: string[] }) {
+  return <section aria-label="结合行程的准备建议" className="overflow-hidden rounded-[1.5rem] border border-tower/15 bg-white shadow-sm">
+    <div className="flex items-center gap-3 border-b border-ink/8 px-4 py-3.5"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-tower/10 text-tower"><Sparkles className="h-5 w-5" /></span><h5 className="font-display text-xl font-black tracking-tight">行前准备</h5><span className="ml-auto rounded-full bg-tower/8 px-2.5 py-1 text-[10px] font-black text-tower">天气建议</span></div>
+    <ul className="divide-y divide-ink/8 px-4">{advice.map((item, index) => <li key={item} className="grid grid-cols-[24px_1fr] gap-2.5 py-3 text-[13px] font-semibold leading-6 text-ink/65"><span className="mt-0.5 grid h-6 w-6 place-items-center rounded-full bg-tower text-[10px] font-black text-white">{index + 1}</span><span>{item}</span></li>)}</ul>
+  </section>;
+}
+
+function TripForecastCard({ days, today }: { days: WeatherDay[]; today?: WeatherDay }) {
+  return <section aria-label="行程期间天气" className="rounded-[1.65rem] bg-white p-5 shadow-[0_14px_36px_rgba(18,34,42,.09)]"><h5 className="font-display text-2xl font-black tracking-tight">行程期间</h5><div className="mt-3 divide-y divide-ink/8">{days.map((day, index) => <div key={day.date} className="grid grid-cols-[48px_minmax(0,1fr)_auto] items-center gap-3 py-4 first:pt-2"><WeatherDayIcon code={day.code} /><div className="min-w-0"><div className="flex items-baseline gap-2"><strong className="text-base font-black">{index === 0 ? '今天' : `第${index + 1}天`}</strong><span className="text-xs font-bold text-ink/35">{day.date.slice(5).replace('-', '/')}</span></div><p className="mt-1 text-base font-black text-river">{weatherLabel(day.code)}</p><p className="mt-1 text-xs font-bold text-ink/45">降雨 {day.rainProbability}% · UV {day.uv.toFixed(1)}</p></div><strong className="font-display text-xl font-black tabular-nums text-ink">{Math.round(day.min)}°–{Math.round(day.max)}°</strong></div>)}</div>{today && <div className="mt-3 grid grid-cols-2 gap-3"><MiniFact icon={Sunrise} label="日出" value={today.sunrise.slice(11, 16)} /><MiniFact icon={Sunset} label="日落" value={today.sunset.slice(11, 16)} /></div>}</section>;
+}
+
+function WeatherDayIcon({ code }: { code: number }) {
+  const Icon = code === 0 ? Sun : code <= 3 ? CloudSun : CloudRain;
+  const tone = code === 0 ? 'bg-amber-100 text-amber-600' : code <= 3 ? 'bg-sky-100 text-sky-600' : 'bg-river/10 text-river';
+  return <span className={`grid h-12 w-12 place-items-center rounded-2xl ${tone}`}><Icon className="h-7 w-7" /></span>;
+}
+
+function MiniFact({ icon: Icon, label, value }: { icon: typeof Sunrise; label: string; value: string }) { return <div className="flex items-center gap-3 rounded-2xl bg-ink/[0.035] p-3"><Icon className="h-7 w-7 shrink-0 text-tower" /><span className="text-xs font-bold text-ink/45">{label}</span><strong className="ml-auto font-display text-base font-black tabular-nums">{value}</strong></div>; }
 function weatherLabel(code: number) { if (code === 0) return '晴朗'; if (code <= 3) return '多云'; if (code <= 48) return '雾'; if (code <= 57) return '毛毛雨'; if (code <= 67) return '降雨'; if (code <= 77) return '降雪'; if (code <= 82) return '阵雨'; if (code <= 86) return '阵雪'; return '雷雨'; }
 function buildWeatherAdvice(weather: WeatherData, request: TripRequest) { const advice: string[] = []; const today = weather.daily[0]; if (weather.apparentTemperature >= 33 || (today?.max ?? 0) >= 34) advice.push('防暑优先：准备饮水、电解质和遮阳帽；把长时间户外点位避开 12:00–15:00。'); if ((today?.uv ?? 0) >= 6) advice.push(`紫外线指数最高 ${today.uv.toFixed(1)}，建议 SPF30+ 防晒，并每 2–3 小时补涂。`); if ((today?.rainProbability ?? 0) >= 40 || weather.precipitation > 0) advice.push(`降雨概率最高 ${today?.rainProbability ?? 0}%，带折叠伞和防滑鞋；优先保留室内或有遮蔽点位。`); if (weather.windGusts >= 35) advice.push(`阵风约 ${Math.round(weather.windGusts)} km/h，江边和观景台减少使用自拍杆，留意临时封闭。`); if (request.travelerType === '老人' || request.specialNeeds.includes('行动不便')) advice.push('同行包含老人或行动不便需求：每 60–90 分钟安排休息，雨后减少台阶和湿滑栈道路段。'); if (request.specialNeeds.includes('带儿童')) advice.push('带儿童出行：额外准备替换衣物、驱蚊用品和少量补充能量的零食。'); if (!advice.length) advice.push('天气风险较低，按原路线执行即可；仍建议随身带水，并在出发前再次刷新天气。'); return advice.slice(0, 4); }
 
@@ -288,8 +439,16 @@ export function getDianpingSearchUrl(city: TripRequest['destinationCity'], name:
 }
 
 function Food({ plan }: { plan: NonNullable<ReturnType<typeof useTrip>['plan']> }) {
-  return <div className="space-y-4"><div><h4 className="font-display text-2xl font-black">餐饮建议</h4><p className="mt-1 text-xs font-bold text-ink/45">菜品为区域推荐，可前往大众点评筛选具体门店并核对营业状态。</p></div>{plan.foodRecommendations.length ? plan.foodRecommendations.map((food) => <article key={food.id} className="rounded-3xl bg-white p-4 shadow-sm"><h5 className="font-black">{food.name}</h5><p className="mt-2 text-sm font-bold text-ink/60">{food.area} · {food.priceRange}</p><div className="mt-2 flex flex-wrap gap-1">{food.tags.map((tag) => <span key={tag} className="rounded-full bg-jade/10 px-2 py-1 text-xs font-black text-jade">{tag}</span>)}</div><p className="mt-3 text-xs font-bold text-tower">营业状态：{food.businessStatus}</p><div className="mt-3 flex flex-wrap items-center justify-between gap-2"><a href={food.source.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] font-black text-river">来源：{food.source.name} · 核验 {food.source.checkedAt}<ExternalLink className="h-3 w-3" /></a><a href={getDianpingSearchUrl(plan.requestSnapshot.destinationCity, food.name, food.area)} target="_blank" rel="noreferrer" aria-label={`在大众点评搜索${food.name}同类店铺`} className="inline-flex items-center gap-1.5 rounded-full bg-[#fff1eb] px-3 py-2 text-xs font-black text-[#d95028] transition hover:bg-[#ffdfd2]">大众点评 · 搜索同类店铺<ExternalLink className="h-3.5 w-3.5" /></a></div></article>) : <p className="rounded-2xl bg-white p-4 text-sm font-bold text-ink/55">当前限制条件下没有合适条目，请放宽筛选或自行核验。</p>}</div>;
+  const foodStops = (plan.route.points as PlannedRoutePoint[]).filter((point) => point.type === 'food');
+  const firstStop = foodStops[0];
+  const totalStay = foodStops.reduce((sum, point) => sum + point.durationMinutes, 0);
+  return <div className="space-y-4"><h4 className="font-display text-2xl font-black">路线餐饮点</h4>
+    <section aria-label="路线餐饮 KPI" className="grid grid-cols-3 gap-2 rounded-[1.5rem] bg-gradient-to-br from-ink to-river p-3 text-white shadow-[0_14px_32px_rgba(18,34,42,.16)]"><FoodKpi label="餐饮点" value={`${foodStops.length} 处`} /><FoodKpi label="首个到达" value={firstStop?.arrivalTime ?? firstStop?.time ?? '待安排'} /><FoodKpi label="计划停留" value={`${totalStay} 分钟`} /></section>
+    {firstStop && <p className="rounded-2xl border border-river/10 bg-river/[0.055] px-3 py-2.5 text-[11px] font-bold text-ink/55"><span className="font-black text-river">当前路线用餐锚点：</span>{firstStop.name} · 第 {firstStop.day ?? 1} 天 · {firstStop.arrivalTime ?? firstStop.time}</p>}
+    {plan.foodRecommendations.length ? plan.foodRecommendations.map((food) => <article key={food.id} className="rounded-3xl bg-white p-4 shadow-sm"><h5 className="font-black">{food.name}</h5><p className="mt-2 text-sm font-bold text-ink/60">{food.area} · {food.priceRange}</p><div className="mt-2 flex flex-wrap gap-1">{food.tags.map((tag) => <span key={tag} className="rounded-full bg-jade/10 px-2 py-1 text-xs font-black text-jade">{tag}</span>)}</div><p className="mt-3 text-xs font-bold text-tower">营业状态：{food.businessStatus}</p><div className="mt-3 flex flex-wrap items-center justify-between gap-2"><a href={food.source.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] font-black text-river">来源：{food.source.name} · 核验 {food.source.checkedAt}<ExternalLink className="h-3 w-3" /></a><a href={food.dianpingUrl ?? getDianpingSearchUrl(plan.requestSnapshot.destinationCity, food.name, food.area)} target="_blank" rel="noreferrer" aria-label={`打开${food.name}大众点评商户详情`} className="inline-flex items-center gap-1.5 rounded-full bg-[#fff1eb] px-3 py-2 text-xs font-black text-[#d95028] transition hover:bg-[#ffdfd2]">大众点评 · 商户详情<ExternalLink className="h-3.5 w-3.5" /></a></div></article>) : <p className="rounded-2xl bg-white p-4 text-sm font-bold text-ink/55">当前限制条件下没有合适条目，请放宽筛选或自行核验。</p>}</div>;
 }
+
+function FoodKpi({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl border border-white/10 bg-white/10 p-2.5 backdrop-blur"><span className="block text-[9px] font-bold text-white/45">{label}</span><strong className="mt-1 block text-xs">{value}</strong></div>; }
 
 function Budget({ items, target, days, onChange }: { items: BudgetItem[]; target: number; days: number; onChange: (items: BudgetItem[]) => void }) {
   const total = budgetTotal(items); const remaining = target - total; const progress = target > 0 ? Math.min(100, Math.round(total / target * 100)) : 0;
@@ -306,10 +465,8 @@ function BudgetRow({ item, index, onUpdate, onDelete }: { item: BudgetItem; inde
 }
 
 function CommandButton({ icon: Icon, label, onClick, disabled, spin }: { icon: typeof RefreshCw; label: string; onClick?: () => void; disabled?: boolean; spin?: boolean }) { return <button type="button" aria-label={label} disabled={disabled} onClick={onClick} className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-white/90 px-4 py-2 text-xs font-black text-ink shadow-soft backdrop-blur disabled:opacity-60"><Icon className={`h-4 w-4 ${spin ? 'animate-spin' : ''}`} />{label}</button>; }
-function Metric({ label, value, tone = 'ink' }: { label: string; value: string; tone?: 'ink' | 'river' | 'tower' | 'jade' }) {
-  const tones = { ink: 'border-white/15 bg-[#10272f]/95', river: 'border-white/20 bg-[#0e6b72]/95', tower: 'border-white/20 bg-[#b64a32]/95', jade: 'border-white/20 bg-[#18775e]/95' };
-  return <div className={`rounded-2xl border p-3 text-white shadow-[0_12px_28px_rgba(18,34,42,.28)] backdrop-blur-sm ${tones[tone]}`}><div className="text-[10px] font-black uppercase tracking-[.12em] text-white/70">{label}</div><div className="mt-1 font-display text-lg font-black leading-tight text-white">{value}</div></div>;
+function TimeMetric({ label, value, tone, onChange }: { label: string; value: string; tone: 'river' | 'tower'; onChange: (value: string) => void }) {
+  return <label className="rounded-2xl bg-white p-4 shadow-sm transition focus-within:ring-4 focus-within:ring-jade/15"><span className="block text-xs font-black text-ink/50">{label}</span><span className="mt-2 flex items-center gap-2"><Clock3 className={`h-4 w-4 shrink-0 ${tone === 'tower' ? 'text-tower' : 'text-river'}`} /><input aria-label={`总览${label}`} type="time" value={value} onChange={(event) => onChange(event.target.value)} className="focus-ring min-w-0 w-full bg-transparent font-display text-xl font-black text-ink" /></span></label>;
 }
-function formatDriveDuration(minutes: number) { const hours = Math.floor(minutes / 60); const rest = minutes % 60; return hours > 0 ? `${hours}小时${rest ? `${rest}分` : ''}` : `${rest}分钟`; }
 function EditableMetric({ label, value, min, max, step = 1, prefix = '', suffix = '', onCommit }: { label: string; value: number; min: number; max: number; step?: number; prefix?: string; suffix?: string; onCommit: (value: number) => void }) { const [draft, setDraft] = useState(String(value)); useEffect(() => setDraft(String(value)), [value]); const commit = () => { const parsed = Number(draft); const next = Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : value; setDraft(String(next)); onCommit(next); }; return <label className="rounded-2xl bg-white p-4 shadow-sm transition focus-within:ring-4 focus-within:ring-jade/15"><span className="block text-xs font-black text-ink/50">{label}</span><span className="mt-2 flex items-baseline gap-1 font-display text-xl font-black text-ink">{prefix && <span>{prefix}</span>}<input aria-label={`总览${label}`} type="number" min={min} max={max} step={step} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} className="focus-ring min-w-0 w-full bg-transparent font-display text-xl font-black text-ink" />{suffix && <span className="shrink-0 text-sm">{suffix}</span>}</span></label>; }
 

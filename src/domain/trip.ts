@@ -52,6 +52,7 @@ export type FoodRecommendation = {
   priceRange: string;
   businessStatus: '非实时，出发前核验';
   tags: string[];
+  dianpingUrl: string;
   source: { name: string; url: string; checkedAt: string };
 };
 
@@ -86,33 +87,33 @@ const origins: Record<CityName, TripOrigin> = {
 
 const foodLibrary: Record<CityName, Array<Omit<FoodRecommendation, 'id' | 'businessStatus'>>> = {
   武汉: [
-    food('热干面与三鲜豆皮', '粮道街 / 山海关路', '¥15–35/人', ['可素食', '本地早餐'], '高德地图公开检索', 'https://uri.amap.com/search?keyword=%E6%AD%A6%E6%B1%89%20%E7%83%AD%E5%B9%B2%E9%9D%A2'),
-    food('藕汤与湖北家常菜', '江汉区 / 武昌区', '¥50–100/人', ['家庭', '清淡可选'], '武汉市文化和旅游局', 'https://wlj.wuhan.gov.cn/'),
+    food('蔡林记（吉庆街店）', '吉庆街 / 江汉路', '¥15–35/人', ['热干面', '本地早餐'], '高德地图公开检索', 'https://uri.amap.com/search?keyword=%E6%AD%A6%E6%B1%89%20%E8%94%A1%E6%9E%97%E8%AE%B0', 'https://www.dianping.com/shop/l3LoOn1gi2ggY01E'),
+    food('融厨湖北菜·藕汤（江汉路总店）', '江汉路 / 南京路', '¥60–90/人', ['家庭', '藕汤'], '武汉市文化和旅游局', 'https://wlj.wuhan.gov.cn/', 'https://m.dianping.com/shop/128523373'),
   ],
   宜昌: [
-    food('凉虾与萝卜饺子', '解放路 / 西坝', '¥10–30/人', ['小吃', '可选不辣'], '宜昌市文化和旅游局', 'http://whhlyj.yichang.gov.cn/'),
-    food('长江肥鱼', '沿江大道区域', '¥80–150/人', ['家庭', '鱼鲜'], '高德地图公开检索', 'https://uri.amap.com/search?keyword=%E5%AE%9C%E6%98%8C%20%E8%82%A5%E9%B1%BC'),
+    food('郑信记凉虾（致祥路店）', '致祥路 / 解放路', '¥10–25/人', ['凉虾', '可选不辣'], '宜昌市文化和旅游局', 'http://whhlyj.yichang.gov.cn/', 'https://www.dianping.com/shop/9960962'),
+    food('天韵鱼府·宜昌肥鱼（万寿桥店）', '万寿桥 / 沿江大道', '¥80–150/人', ['家庭', '宜昌肥鱼'], '高德地图公开检索', 'https://uri.amap.com/search?keyword=%E5%AE%9C%E6%98%8C%20%E8%82%A5%E9%B1%BC', 'https://www.dianping.com/shop/H7uXblc4aqbQNGQq'),
   ],
   恩施: [
-    food('合渣与炕土豆', '女儿城 / 舞阳坝', '¥25–60/人', ['土家风味', '可要求不辣'], '恩施州文化和旅游局', 'http://wtxgj.enshi.gov.cn/'),
-    food('土家家常菜', '恩施市区', '¥50–100/人', ['家庭', '素菜可选'], '高德地图公开检索', 'https://uri.amap.com/search?keyword=%E6%81%A9%E6%96%BD%20%E5%9C%9F%E5%AE%B6%E8%8F%9C'),
+    food('张关合渣（女儿城店）', '女儿城', '¥40–80/人', ['合渣', '土家风味'], '恩施州文化和旅游局', 'http://wtxgj.enshi.gov.cn/', 'https://www.dianping.com/shop/24748371'),
+    food('恩施土家菜馆', '恩施市区', '¥60–90/人', ['家庭', '炕洋芋'], '高德地图公开检索', 'https://uri.amap.com/search?keyword=%E6%81%A9%E6%96%BD%20%E5%9C%9F%E5%AE%B6%E8%8F%9C', 'https://m.dianping.com/shop/92907850'),
   ],
   荆州: [
-    food('早堂面与锅盔', '沙市区', '¥15–35/人', ['早餐', '可选不辣'], '荆州市文化和旅游局', 'http://whhlyj.jingzhou.gov.cn/'),
-    food('荆州鱼糕', '古城 / 沙市', '¥45–90/人', ['家庭', '地方菜'], '高德地图公开检索', 'https://uri.amap.com/search?keyword=%E8%8D%86%E5%B7%9E%20%E9%B1%BC%E7%B3%95'),
+    food('福寿早堂面（江汉南路店）', '沙市区 / 江汉南路', '¥15–35/人', ['早堂面', '早餐'], '荆州市文化和旅游局', 'http://whhlyj.jingzhou.gov.cn/', 'https://www.dianping.com/shop/5982343'),
+    food('荣子鱼糕', '古城 / 沙市', '¥45–90/人', ['鱼糕', '地方菜'], '高德地图公开检索', 'https://uri.amap.com/search?keyword=%E8%8D%86%E5%B7%9E%20%E9%B1%BC%E7%B3%95', 'https://www.dianping.com/shop/22895642'),
   ],
   襄阳: [
-    food('襄阳牛肉面', '樊城 / 北街', '¥15–30/人', ['早餐', '默认偏辣'], '襄阳市文化和旅游局', 'http://wlj.xiangyang.gov.cn/'),
-    food('豆腐面与黄酒', '古城周边', '¥20–45/人', ['地方早餐', '素食可选'], '高德地图公开检索', 'https://uri.amap.com/search?keyword=%E8%A5%84%E9%98%B3%20%E8%B1%86%E8%85%90%E9%9D%A2'),
+    food('邓家牛腩面', '樊城 / 人民广场', '¥15–30/人', ['牛肉面', '默认偏辣'], '襄阳市文化和旅游局', 'http://wlj.xiangyang.gov.cn/', 'https://www.dianping.com/shop/5112569'),
+    food('吉鑫牛肉牛杂面馆（世纪坐标城店）', '襄阳城区', '¥15–30/人', ['豆腐面', '黄酒'], '高德地图公开检索', 'https://uri.amap.com/search?keyword=%E8%A5%84%E9%98%B3%20%E8%B1%86%E8%85%90%E9%9D%A2', 'https://www.dianping.com/shop/19139123'),
   ],
   黄石: [
-    food('黄石港饼', '黄石港区', '¥10–30/人', ['伴手礼', '素食可选'], '黄石市文化和旅游局', 'http://wlj.huangshi.gov.cn/'),
-    food('磁湖湖鲜', '磁湖周边', '¥70–140/人', ['家庭', '鱼鲜'], '高德地图公开检索', 'https://uri.amap.com/search?keyword=%E9%BB%84%E7%9F%B3%20%E6%B9%96%E9%B2%9C'),
+    food('陶然风味园（广场路店）', '黄石港区 / 广场路', '¥35–70/人', ['本地早餐', '家常菜'], '黄石市文化和旅游局', 'http://wlj.huangshi.gov.cn/', 'https://www.dianping.com/shop/17201460'),
+    food('湘湘田田·现炒黄牛肉（黄石港万达店）', '黄石港万达', '¥60–100/人', ['家庭', '现炒菜'], '高德地图公开检索', 'https://uri.amap.com/search?keyword=%E9%BB%84%E7%9F%B3%20%E6%B9%96%E9%B2%9C', 'https://www.dianping.com/shop/H2Ea0sbuRynFKhXy'),
   ],
 };
 
-function food(name: string, area: string, priceRange: string, tags: string[], sourceName: string, url: string) {
-  return { name, area, priceRange, tags, source: { name: sourceName, url, checkedAt: '2026-07-13' } };
+function food(name: string, area: string, priceRange: string, tags: string[], sourceName: string, url: string, dianpingUrl: string) {
+  return { name, area, priceRange, tags, dianpingUrl, source: { name: sourceName, url, checkedAt: '2026-07-15' } };
 }
 
 export function defaultTripRequest(city: CityName = '宜昌'): TripRequest {
@@ -306,5 +307,7 @@ export function buildSocialCopy(request: TripRequest) {
   const interests = request.interests.length ? request.interests.join('、') : '轻松游';
   return `${request.destinationCity}${request.days}天旅行计划已生成：总预算${request.budget}元，重点安排${interests}。路线会按当前条件同步更新，出发前请再次核验开放时间与交通状态。`;
 }
+
+export function buildFoodRecommendations(request: TripRequest) { return filterFoods(request); }
 
 export type PersistedAppState = { version: 2; request: TripRequest; plan: TripPlan | null; journalEntries: JournalEntry[] };
