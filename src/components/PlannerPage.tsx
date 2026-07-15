@@ -85,13 +85,13 @@ export function PlannerPage() {
 
           {resultMode && plan && <section ref={resultRef} className="space-y-4 scroll-mt-28">
             <div className="flex flex-col justify-between gap-3 rounded-[1.5rem] bg-white/80 p-4 shadow-sm ring-1 ring-ink/5 md:flex-row md:items-center">
-              <div><div className="text-xs font-black uppercase tracking-[0.18em] text-river">RULES-V1 ROUTE WORKSPACE</div><h2 className="mt-1 font-display text-2xl font-black text-ink">{plan.route.title}</h2></div>
+              <h2 className="font-display text-2xl font-black text-ink">{plan.route.title}</h2>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => { if (window.confirm('重置当前方案？真实手账和照片会保留。')) { resetPlan(); setResultMode(false); } }} className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-black text-ink shadow-sm"><RotateCcw className="h-4 w-4" />重置方案</button>
                 <button type="button" onClick={() => setResultMode(false)} className="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-black text-white"><ArrowLeft className="h-4 w-4" />返回修改</button>
               </div>
             </div>
-            <MapWorkspace route={plan.route} plan={plan.content} selectedPointId={selectedPointId} activePointIndex={Math.max(0, plan.route.points.findIndex((item) => item.id === selectedPointId))} navigating={false} imageUrl={selectedCity.imageUrl} onSelectPoint={(point: RoutePoint) => setSelectedPointId(point.id)} onRegenerate={replan} onCopySocial={async () => { try { await navigator.clipboard.writeText(plan.route.sceneryAnalysis.socialCopy); notify('路线文案已复制。', 'success'); } catch { notify('浏览器不允许复制，请手动选择。', 'error'); } }} onSimulateNavigation={() => notify('本功能仅演示路线顺序，不冒充实时导航。')} />
+            <MapWorkspace route={plan.route} plan={plan.content} selectedPointId={selectedPointId} activePointIndex={Math.max(0, plan.route.points.findIndex((item) => item.id === selectedPointId))} navigating={false} imageUrl={selectedCity.imageUrl} onSelectPoint={(point: RoutePoint) => setSelectedPointId(point.id)} onRegenerate={replan} onSimulateNavigation={() => notify('本功能仅演示路线顺序，不冒充实时导航。')} />
             {isReplanning && <div className="fixed inset-0 z-[90] grid place-items-center bg-ink/25 backdrop-blur-sm"><div className="flex items-center gap-3 rounded-3xl bg-white px-6 py-5 font-black text-ink shadow-soft"><Loader2 className="h-5 w-5 animate-spin text-river" />规则引擎计算中…</div></div>}
           </section>}
         </div>

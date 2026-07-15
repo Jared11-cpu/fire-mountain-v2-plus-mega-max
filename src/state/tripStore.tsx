@@ -4,6 +4,8 @@ import type { CityName } from '../data/mockData';
 import {
   addDaysIso,
   budgetTotal,
+  buildFoodRecommendations,
+  buildSocialCopy,
   calculateTimeline,
   comparePlans,
   daysBetween,
@@ -82,9 +84,12 @@ function readInitialState(): TripState {
     legacyEntries = [];
   }
   const request = persisted?.version === 2 ? normalizeRequest(persisted.request) : fallbackRequest;
+  const persistedPlan = persisted?.version === 2 && persisted.plan
+    ? { ...persisted.plan, foodRecommendations: buildFoodRecommendations(request) }
+    : null;
   return {
     request,
-    plan: persisted?.version === 2 ? persisted.plan : null,
+    plan: persistedPlan,
     journalEntries: persisted?.version === 2 ? persisted.journalEntries : legacyEntries,
     parsedTags: [],
     parseWarnings: [],
@@ -218,7 +223,12 @@ export function TripProvider({ children }: { children: ReactNode }) {
     const actualDuration = routePoints.reduce((sum, point) => sum + point.durationMinutes + point.travelMinutesToNext, 0);
     return { ...plan, settings: { ...settings, targetPointCount: routePoints.length, targetDurationMinutes: actualDuration }, route: { ...plan.route, points: routePoints } };
   }), [patchPlan]);
-  const updateBudgetItems = useCallback((items: BudgetItem[]) => patchPlan((plan) => ({ ...plan, budgetItems: items, requestSnapshot: { ...plan.requestSnapshot, budget: budgetTotal(items) } })), [patchPlan]);
+  const updateBudgetItems = useCallback((items: BudgetItem[]) => {
+    const total = budgetTotal(items);
+    const request = { ...state.request, budget: total };
+    dispatch({ type: 'request', request });
+    if (state.plan) dispatch({ type: 'plan', plan: syncPlanBudget(state.plan, items, request) });
+  }, [state.plan, state.request]);
   const setBudgetTotal = useCallback((value: number) => {
     const total = Math.max(0, Math.round(Number(value) || 0));
     const currentTotal = state.plan ? budgetTotal(state.plan.budgetItems) : 0;
@@ -238,7 +248,7 @@ export function TripProvider({ children }: { children: ReactNode }) {
     }
     const request = { ...state.request, budget: total };
     dispatch({ type: 'request', request });
-    if (state.plan) dispatch({ type: 'plan', plan: { ...state.plan, budgetItems: items, requestSnapshot: request, updatedAt: new Date().toISOString() } });
+    if (state.plan) dispatch({ type: 'plan', plan: syncPlanBudget(state.plan, items, request) });
   }, [state.plan, state.request]);
   const setJournalEntries = useCallback((entries: JournalEntry[]) => dispatch({ type: 'journal', entries }), []);
   const resetPlan = useCallback(() => {
@@ -252,6 +262,31 @@ export function TripProvider({ children }: { children: ReactNode }) {
   const value = useMemo<TripContextValue>(() => ({ ...state, updateRequest, selectCity, parseText, generate, replan, setPlan, patchPlan, updatePlanSettings, updateBudgetItems, setBudgetTotal, setJournalEntries, resetPlan, notify }), [generate, notify, parseText, patchPlan, replan, resetPlan, selectCity, setBudgetTotal, setJournalEntries, setPlan, state, updateBudgetItems, updatePlanSettings, updateRequest]);
 
   return <TripContext.Provider value={value}>{children}<GlobalStatus state={state} /></TripContext.Provider>;
+}
+
+function syncPlanBudget(plan: TripPlan, items: BudgetItem[], request: TripRequest): TripPlan {
+  const previousBudget = plan.requestSnapshot.budget;
+  const total = request.budget;
+  const replaceBudget = (text: string) => text.replace(new RegExp(`${previousBudget}\\s*元`, 'g'), `${total}元`);
+  return {
+    ...plan,
+    updatedAt: new Date().toISOString(),
+    budgetItems: items,
+    requestSnapshot: request,
+    content: {
+      ...plan.content,
+      title: replaceBudget(plan.content.title),
+      summary: replaceBudget(plan.content.summary),
+      budget: items.map(({ item, amount, note }) => ({ item, amount, note })),
+      socialCopy: buildSocialCopy(request),
+      videoScript: plan.content.videoScript.map(replaceBudget),
+    },
+    route: {
+      ...plan.route,
+      title: replaceBudget(plan.route.title),
+      sceneryAnalysis: { ...plan.route.sceneryAnalysis, socialCopy: buildSocialCopy(request) },
+    },
+  };
 }
 
 function GlobalStatus({ state }: { state: TripState }) {

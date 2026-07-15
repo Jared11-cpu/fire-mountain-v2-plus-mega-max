@@ -6,10 +6,11 @@ import { classifyDrivingFailure, convertGpsPoint, loadAmapJsApi, loadAmapPlugin,
 
 declare global { interface Window { AMap?: any; _AMapSecurityConfig?: { securityJsCode: string } } }
 
-type Props = { route: SmartRoute; selectedPointId?: string; activePointIndex: number; navigating: boolean; onSelectPoint: (point: RoutePoint) => void; onRoadPlanChange?: (metrics: RoadPlanMetrics) => void; mapOnly?: boolean };
+export type RouteMapJournalCard = { id: string; note: string; photoUrl?: string };
+type Props = { route: SmartRoute; selectedPointId?: string; activePointIndex: number; navigating: boolean; onSelectPoint: (point: RoutePoint) => void; onRoadPlanChange?: (metrics: RoadPlanMetrics) => void; mapOnly?: boolean; journalCards?: RouteMapJournalCard[] };
 const icons: Record<RoutePoint['type'], typeof MapPin> = { start: Navigation, scenic: MapPin, food: Utensils, photo: Camera, rest: Clock3, hotel: MapPin, end: RouteIcon };
 
-export function RouteMap({ route, selectedPointId, onSelectPoint, onRoadPlanChange, mapOnly = false }: Props) {
+export function RouteMap({ route, selectedPointId, onSelectPoint, onRoadPlanChange, mapOnly = false, journalCards = [] }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>();
   const markerRef = useRef<any[]>([]);
@@ -25,6 +26,7 @@ export function RouteMap({ route, selectedPointId, onSelectPoint, onRoadPlanChan
   const key = import.meta.env.VITE_AMAP_KEY;
   const securityCode = import.meta.env.VITE_AMAP_SECURITY_CODE;
   const routeSignature = useMemo(() => route.points.map(({ id, lng, lat, roadAccessLng, roadAccessLat, coordinateSystem }) => `${id}:${lng},${lat}:${roadAccessLng},${roadAccessLat}:${coordinateSystem}`).join('|'), [route.points]);
+  const journalCardSignature = useMemo(() => journalCards.map(({ id, note, photoUrl }) => `${id}:${note}:${photoUrl ?? ''}`).join('|'), [journalCards]);
 
   useEffect(() => {
     let disposed = false;
@@ -82,7 +84,7 @@ export function RouteMap({ route, selectedPointId, onSelectPoint, onRoadPlanChan
         mapRef.current = map;
         setMapAvailable(true);
 
-        markerRef.current = amapPoints.map((point, index) => createRouteMarker(AMap, map, point, index, onSelectPoint, point.id === selectedPointId));
+        markerRef.current = amapPoints.map((point, index) => createRouteMarker(AMap, map, point, index, onSelectPoint, point.id === selectedPointId, journalCards.find((card) => card.id === point.id)));
         const routeResult = await planAmapDrivingRoute(AMap, amapPoints);
         if (!isCurrent()) {
           routeResult.drivingInstances.forEach((driving) => driving?.clear?.());
@@ -117,20 +119,26 @@ export function RouteMap({ route, selectedPointId, onSelectPoint, onRoadPlanChan
       requestIdRef.current += 1;
       cleanupMap();
     };
-  }, [route.id, routeSignature, route.totalDistanceKm, amapEnabled, key, securityCode, retryVersion, onRoadPlanChange]);
+  }, [route.id, routeSignature, route.totalDistanceKm, amapEnabled, key, securityCode, retryVersion, onRoadPlanChange, journalCardSignature]);
 
   useEffect(() => {
     if (!selected || !mapAvailable || !mapRef.current) return;
     mapRef.current.resize?.();
     mapRef.current.setZoomAndCenter(15, [selected.lng, selected.lat], false, 350);
-    markerRef.current.forEach((marker, index) => marker.setContent?.(markerContent(route.points[index], index, route.points[index].id === selected.id)));
-  }, [selected?.id, mapAvailable]);
+    markerRef.current.forEach((marker, index) => {
+      const point = route.points[index];
+      const active = point.id === selected.id;
+      marker.setContent?.(markerContent(point, index, active));
+      const card = journalCards.find((item) => item.id === point.id);
+      if (card) marker.setLabel?.({ content: markerLabelContent(point, index, card, active), direction: index % 2 ? 'left' : 'right', offset: new window.AMap.Pixel(index % 2 ? -12 : 12, -20) });
+    });
+  }, [selected?.id, mapAvailable, journalCardSignature]);
 
   const failed = status !== 'loading' && status !== 'planned';
 
   return <section className={`min-w-0 overflow-hidden bg-white ${mapOnly ? 'h-full' : 'rounded-[1.75rem] shadow-soft ring-1 ring-ink/5'}`}>
     {!mapOnly && <div className="flex flex-col gap-4 border-b border-ink/5 p-5 md:flex-row md:items-center md:justify-between"><div><div className="inline-flex items-center gap-2 text-xs font-black tracking-[.16em] text-river"><Navigation className="h-4 w-4"/>LIVE ROUTE</div><h3 className="mt-2 font-display text-2xl font-black">{route.title}</h3><p className="mt-1 text-sm text-ink/50">{message}</p></div><div className="flex gap-2 text-xs font-bold"><span className="rounded-full bg-mist px-3 py-2">{route.totalDistanceKm} km</span><span className="rounded-full bg-mist px-3 py-2">{route.recommendedStartTime} 出发</span></div></div>}
-      <div className={mapOnly ? 'h-full min-w-0' : 'grid min-w-0 lg:grid-cols-[1.35fr_.65fr]'}><div className={`relative min-w-0 overflow-hidden bg-[#d8f1ee] ${mapOnly ? 'h-full min-h-[620px]' : 'min-h-[430px]'}`}><div ref={container} className={`absolute inset-0 ${!mapAvailable ? 'invisible' : ''}`}/>{mapAvailable && <div className="pointer-events-none absolute bottom-3 left-3 z-20 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black text-river shadow-sm">高德交互地图</div>}{!mapAvailable && status !== 'loading' && <GaodeRasterRouteMap route={route} selectedPointId={selectedPointId} onSelectPoint={onSelectPoint} />}{status === 'loading' && <div className="absolute inset-0 grid place-items-center bg-[#d8f1ee]"><div className="rounded-2xl bg-white/90 px-5 py-4 text-sm font-black text-river shadow-soft">正在请求高德道路规划…</div></div>}{failed && <div role="alert" className="absolute left-4 right-4 top-20 z-30 rounded-2xl border border-red-200 bg-white/95 p-4 shadow-xl backdrop-blur"><div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500"/><div className="min-w-0 flex-1"><strong className="block text-sm text-red-700">道路规划失败，当前仅为点位连线</strong><p className="mt-1 text-xs font-bold leading-5 text-ink/55">{message}；仅为点位连线，不代表真实道路。</p></div><button type="button" onClick={() => { resetAmapJsApiLoader(); setRetryVersion((value) => value + 1); }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white"><RefreshCw className="h-3.5 w-3.5"/>重新规划</button></div></div>}</div>
+      <div className={mapOnly ? 'h-full min-w-0' : 'grid min-w-0 lg:grid-cols-[1.35fr_.65fr]'}><div className={`relative min-w-0 overflow-hidden bg-[#d8f1ee] ${mapOnly ? 'h-full min-h-[620px]' : 'min-h-[430px]'}`}><div ref={container} className={`absolute inset-0 ${!mapAvailable ? 'invisible' : ''}`}/>{mapAvailable && <div className="pointer-events-none absolute bottom-3 left-3 z-20 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black text-river shadow-sm">高德交互地图</div>}{!mapAvailable && status !== 'loading' && <GaodeRasterRouteMap route={route} selectedPointId={selectedPointId} onSelectPoint={onSelectPoint} journalCards={journalCards} />}{status === 'loading' && <div className="absolute inset-0 grid place-items-center bg-[#d8f1ee]"><div className="rounded-2xl bg-white/90 px-5 py-4 text-sm font-black text-river shadow-soft">正在请求高德道路规划…</div></div>}{failed && <div role="alert" className="absolute left-4 right-4 top-20 z-30 rounded-2xl border border-red-200 bg-white/95 p-4 shadow-xl backdrop-blur"><div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500"/><div className="min-w-0 flex-1"><strong className="block text-sm text-red-700">道路规划失败，当前仅为点位连线</strong><p className="mt-1 text-xs font-bold leading-5 text-ink/55">{message}；仅为点位连线，不代表真实道路。</p></div><button type="button" onClick={() => { resetAmapJsApiLoader(); setRetryVersion((value) => value + 1); }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white"><RefreshCw className="h-3.5 w-3.5"/>重新规划</button></div></div>}</div>
       {!mapOnly&&<aside className="bg-[#fbfaf5] p-5">{selected&&<><div className="text-xs font-black tracking-[.16em] text-tower">STOP {route.points.findIndex(p=>p.id===selected.id)+1}</div><h4 className="mt-2 font-display text-3xl font-black">{selected.name}</h4><div className="mt-2 flex gap-2 text-xs font-bold text-ink/50"><span>{getPointTypeLabel(selected.type)}</span><span>·</span><span>{selected.time}</span><span>·</span><span>{selected.stayMinutes} 分钟</span></div><p className="mt-5 leading-7 text-ink/68">{selected.reason}</p><div className="mt-4 rounded-xl border-l-4 border-tower bg-white p-4 text-sm leading-6"><b>拍照：</b>{selected.photoTip}</div><div className="mt-3 rounded-xl bg-river/5 p-4 text-sm leading-6"><b>手账：</b>{selected.recordTip}</div></>}</aside>}
     </div>
   </section>;
@@ -148,22 +156,27 @@ function failureMessage(status: RoadPlanStatus) {
   return '道路服务暂时不可用，已使用灰色虚线显示估算点位顺序。';
 }
 
-function createRouteMarker(AMap: any, map: any, point: RoutePoint, index: number, onSelectPoint: (point: RoutePoint) => void, active: boolean) {
+function createRouteMarker(AMap: any, map: any, point: RoutePoint, index: number, onSelectPoint: (point: RoutePoint) => void, active: boolean, journalCard?: RouteMapJournalCard) {
   const color = pointColor(point.type);
   const marker = new AMap.Marker({
     position: [point.lng, point.lat],
     title: point.name,
     anchor: 'bottom-center',
     content: markerContent(point, index, active, color),
-    label: {
-      content: `<span class="amap-route-name">${point.name}</span>`,
-      direction: 'bottom',
-      offset: new AMap.Pixel(0, 8),
-    },
+    label: journalCard ? {
+      content: markerLabelContent(point, index, journalCard, active),
+      direction: index % 2 ? 'left' : 'right',
+      offset: new AMap.Pixel(index % 2 ? -12 : 12, -20),
+    } : { content: `<span class="amap-route-name">${point.name}</span>`, direction: 'bottom', offset: new AMap.Pixel(0, 8) },
   });
   marker.on('click', () => onSelectPoint(point));
   map.add(marker);
   return marker;
+}
+
+function markerLabelContent(point: RoutePoint, index: number, card: RouteMapJournalCard, active: boolean) {
+  const photo = card.photoUrl ? `<img src="${escapeMarkerText(card.photoUrl)}" alt="" />` : `<span class="amap-journal-card-empty">旅</span>`;
+  return `<span class="amap-journal-card${active ? ' is-selected' : ''}">${photo}<span class="amap-journal-card-copy"><b>${index + 1}. ${escapeMarkerText(point.name)}</b><em>${escapeMarkerText(card.note || '这一站等待你的心得。')}</em><small>点击翻开手账</small></span></span>`;
 }
 
 function markerContent(point: RoutePoint, index: number, active: boolean, color = pointColor(point.type)) {
@@ -226,7 +239,7 @@ function pointColor(type: RoutePoint['type']) {
   return colors[type];
 }
 
-function GaodeRasterRouteMap({ route, selectedPointId, onSelectPoint }: { route: SmartRoute; selectedPointId?: string; onSelectPoint: (point: RoutePoint) => void }) {
+function GaodeRasterRouteMap({ route, selectedPointId, onSelectPoint, journalCards = [] }: { route: SmartRoute; selectedPointId?: string; onSelectPoint: (point: RoutePoint) => void; journalCards?: RouteMapJournalCard[] }) {
   const points = route.points;
   const zoom = 12;
   const bounds = getPointBounds(points);
@@ -289,15 +302,14 @@ function GaodeRasterRouteMap({ route, selectedPointId, onSelectPoint }: { route:
             </button>
           );
         })}
-        {projected.map(({ point, x, y }) => (
-          <div
-            key={`${point.id}-name`}
-            className="absolute -translate-x-1/2 rounded-full bg-white/95 px-3 py-1 text-xs font-black text-ink shadow-md"
-            style={{ left: x, top: y + 25 }}
-          >
-            {point.name}
-          </div>
-        ))}
+        {projected.map(({ point, x, y }, index) => {
+          const card = journalCards.find((item) => item.id === point.id);
+          const active = point.id === selectedPointId;
+          return card ? <button key={`${point.id}-card`} type="button" onClick={() => onSelectPoint(point)} className={`absolute z-10 flex w-44 overflow-hidden rounded-2xl border bg-white/95 text-left shadow-xl backdrop-blur transition hover:-translate-y-1 ${active ? 'border-tower ring-4 ring-tower/15' : 'border-white/80'}`} style={{ left: x + (index % 2 ? -190 : 28), top: y - 52 }}>
+            {card.photoUrl ? <img src={card.photoUrl} alt="" className="h-20 w-16 shrink-0 object-cover" /> : <span className="grid h-20 w-12 shrink-0 place-items-center bg-river/10 font-black text-river">旅</span>}
+            <span className="min-w-0 p-2"><b className="block truncate text-xs">{index + 1}. {point.name}</b><em className="journal-handwriting mt-1 line-clamp-2 block text-xs not-italic leading-4 text-ink/60">{card.note || '这一站等待你的心得。'}</em></span>
+          </button> : <div key={`${point.id}-name`} className="absolute -translate-x-1/2 rounded-full bg-white/95 px-3 py-1 text-xs font-black text-ink shadow-md" style={{ left: x, top: y + 25 }}>{point.name}</div>;
+        })}
       </div>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-white/55 to-transparent" />
       <div className="absolute bottom-3 left-3 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black text-ink/60 shadow-sm">高德瓦片底图 · AutoNavi</div>

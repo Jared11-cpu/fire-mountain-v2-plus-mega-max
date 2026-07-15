@@ -14,12 +14,49 @@ const yichangRiverMedia = {
   imageCredit: { author: 'Danny Luo', license: 'CC BY-SA 3.0', sourceUrl: 'https://commons.wikimedia.org/wiki/File:%E4%BB%8E%E6%BB%A8%E6%B1%9F%E5%85%AC%E5%9B%AD%E7%9C%8B%E5%AF%B9%E9%9D%A2%E7%9A%84%E9%9B%A8_-_panoramio.jpg' },
 };
 
+function commonsMedia(fileName: string): Pick<RoutePoint, 'imageUrl' | 'imageCredit'> {
+  const normalized = fileName.replace(/ /g, '_');
+  return {
+    imageUrl: `https://commons.wikimedia.org/wiki/Special:Redirect/file/${encodeURIComponent(fileName)}?width=1280`,
+    imageCredit: {
+      author: 'Wikimedia Commons',
+      license: '许可见来源页',
+      sourceUrl: `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(normalized)}`,
+    },
+  };
+}
+
 const pointMedia: Record<string, Pick<RoutePoint, 'imageUrl' | 'imageCredit'>> = {
   三峡游客中心: threeGorgesMedia,
-  坛子岭观景台: threeGorgesMedia,
-  '185 平台': threeGorgesMedia,
-  西坝不夜城: yichangRiverMedia,
+  坛子岭观景台: commonsMedia('200407-sandouping-sanxiadaba.jpg'),
+  '185 平台': commonsMedia('Drei-Schluchten-Damm (Jangtse).jpg'),
+  西坝不夜城: commonsMedia('Hanyi Road-Central Street 01.jpg'),
   滨江公园夜景: yichangRiverMedia,
+  昙华林: commonsMedia('Tanhualin.JPG'),
+  黄鹤楼红墙: commonsMedia('CN - Hubei - Wuhan - Kranichpagode.jpg'),
+  粮道街: commonsMedia('Hot dry noodles.jpg'),
+  江汉关: commonsMedia('20230208 Hankow Customs House.jpg'),
+  汉口江滩日落: commonsMedia('汉口江滩 - Hankou River Beach Park - 2016.04 - panoramio.jpg'),
+  女儿城: commonsMedia('恩施 土家女儿城 03.jpg'),
+  恩施大峡谷游客中心: commonsMedia('Enshi Grand Canyon 20240725.jpg'),
+  七星寨栈道: commonsMedia('恩施 恩施大峡谷七星寨.jpg'),
+  云龙地缝瀑布: commonsMedia('恩施 于缆车上望向云龙地缝.jpg'),
+  峡谷民宿观景台: commonsMedia('Enshi grand canyon 2025 03.jpg'),
+  荆州博物馆: commonsMedia('Jingzhou Museum 2014.04.20 10-45-55.jpg'),
+  宾阳楼: commonsMedia('宾阳楼 - panoramio.jpg'),
+  早堂面老店: commonsMedia('Doufu wanzi et re gan mian.jpg'),
+  古城墙步道: commonsMedia('荆州东门古城墙.jpg'),
+  沙市洋码头: commonsMedia('2007 湖北 荆州 长江大桥 - panoramio.jpg'),
+  襄阳古城北街: commonsMedia('襄阳古城 - panoramio (3).jpg'),
+  古隆中: commonsMedia('湖北 襄阳古隆中景区大门 - panoramio.jpg'),
+  襄阳牛肉面: commonsMedia('Xiangyang beef noodles 02.jpg'),
+  唐城影视基地: commonsMedia('The Tang City 23.jpg'),
+  汉江桥畔: commonsMedia('View of Changhong Bridge (Xiangyang, Hubei) passing Han river (汉江) during day.jpg'),
+  黄石国家矿山公园: commonsMedia('Huaxin Cement Company former site.jpg'),
+  矿冶主题展区: commonsMedia('HuBei Cement Site Museum.jpg'),
+  磁湖岸线: commonsMedia('Ci Lake lights January 2009 by Matthew Shaw.jpg'),
+  黄石港饼老店: commonsMedia('Wikivoyage banner of Huangshi.jpg'),
+  团城山公园: commonsMedia('黄石湖与山.jpg'),
 };
 
 export const mockStartPoints: Record<CityName, RoutePoint> = {
@@ -35,6 +72,7 @@ export const mockStartPoints: Record<CityName, RoutePoint> = {
     reason: '高铁到达后可直接转地铁，适合开始江城 Citywalk。',
     photoTip: '站前广场适合拍一张出发照，作为短视频开场。',
     recordTip: '记录第一句需求：今天让 AI 带我走武汉老建筑和咖啡线。',
+    ...commonsMedia('20240623 Platforms of Wuhan Railway Station 01.jpg'),
   },
   宜昌: {
     id: 'start-yichang',
@@ -62,6 +100,7 @@ export const mockStartPoints: Record<CityName, RoutePoint> = {
     reason: '恩施站适合接驳大峡谷、女儿城和市区住宿。',
     photoTip: '用站牌和远山同框，暗示峡谷旅行开始。',
     recordTip: '记录“从车站到峡谷”的空间变化，适合短视频转场。',
+    ...commonsMedia('Enshi Railway Station.JPG'),
   },
   荆州: {
     id: 'start-jingzhou',
@@ -75,6 +114,7 @@ export const mockStartPoints: Record<CityName, RoutePoint> = {
     reason: '荆州站到古城和博物馆动线清晰，适合楚文化一日游。',
     photoTip: '站外拍“古城旅行开始”的 Vlog 开头。',
     recordTip: '记录从现代车站进入楚文化古城的反差。',
+    ...commonsMedia('Jingzhou Railway Station 2014.04.20 07-54-17.jpg'),
   },
   襄阳: {
     id: 'start-xiangyang',
@@ -88,6 +128,7 @@ export const mockStartPoints: Record<CityName, RoutePoint> = {
     reason: '适合连接襄阳古城、唐城和汉江夜景。',
     photoTip: '站前拍一张古城主题出发照。',
     recordTip: '记录“汉江古城线”的第一站。',
+    ...commonsMedia('襄阳东站站房外观.jpg'),
   },
   黄石: {
     id: 'start-huangshi',
@@ -101,6 +142,7 @@ export const mockStartPoints: Record<CityName, RoutePoint> = {
     reason: '适合进入矿山公园、磁湖和工业遗产路线。',
     photoTip: '站牌与城市路牌同框，做周末短途开场。',
     recordTip: '记录黄石“矿冶湖山”的第一印象。',
+    ...commonsMedia('Huangshibei Railway Station.jpg'),
   },
 };
 
