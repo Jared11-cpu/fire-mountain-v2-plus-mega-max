@@ -9,6 +9,9 @@ export type RoutePoint = {
   city: CityName;
   lat: number;
   lng: number;
+  roadAccessLat?: number;
+  roadAccessLng?: number;
+  coordinateSystem?: 'wgs84' | 'gcj02';
   time: string;
   stayMinutes: number;
   reason: string;

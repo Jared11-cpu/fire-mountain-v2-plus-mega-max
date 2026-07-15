@@ -3,6 +3,8 @@ import type { RoutePoint } from '../types/route';
 export const AMAP_MAX_WAYPOINTS = 16;
 
 let amapLoaderPromise: Promise<any> | undefined;
+const AMAP_SCRIPT_SELECTOR = 'script[data-amap-js-api="2"]';
+const AMAP_TIMEOUT_MS = 10_000;
 
 export type RoadPlanStatus = 'loading' | 'planned' | 'no-data' | 'auth-error' | 'network-error' | 'fallback';
 
@@ -28,28 +30,44 @@ export type DrivingPlanResult = {
 };
 
 export function loadAmapJsApi(key: string, securityCode?: string) {
-  if (securityCode) window._AMapSecurityConfig = { securityJsCode: securityCode };
+  if (!securityCode || /请填写|placeholder/i.test(securityCode)) return Promise.reject({ status: 'auth-error', error: '缺少高德安全密钥，未发起道路规划' } satisfies DrivingSearchFailure);
+  if (!key || /请填写|placeholder/i.test(key)) return Promise.reject({ status: 'auth-error', error: '缺少高德 Web 端 JS API Key，未发起道路规划' } satisfies DrivingSearchFailure);
+  window._AMapSecurityConfig = { securityJsCode: securityCode };
+  logAmapLoader('security-configured', key);
   if (window.AMap) return Promise.resolve(window.AMap);
   if (amapLoaderPromise) return amapLoaderPromise;
   amapLoaderPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>('script[data-amap-js-api="2"]');
-    const finish = () => window.AMap ? resolve(window.AMap) : reject(new Error('AMap script loaded without window.AMap'));
+    const existing = document.querySelector<HTMLScriptElement>(AMAP_SCRIPT_SELECTOR);
+    let timer = 0;
+    const fail = (script: HTMLScriptElement, error: Error) => { window.clearTimeout(timer); logAmapLoader('script.onerror', key); script.remove(); reject({ status: 'network-error', error } satisfies DrivingSearchFailure); };
+    const finish = (script: HTMLScriptElement) => { window.clearTimeout(timer); logAmapLoader('script.onload', key); if (window.AMap) resolve(window.AMap); else fail(script, new Error('AMap script loaded without window.AMap')); };
     if (existing) {
-      existing.addEventListener('load', finish, { once: true });
-      existing.addEventListener('error', () => reject(new Error('AMap script network load failed')), { once: true });
+      existing.addEventListener('load', () => finish(existing), { once: true });
+      existing.addEventListener('error', () => fail(existing, new Error('AMap script network load failed')), { once: true });
+      timer = window.setTimeout(() => fail(existing, new Error('AMap script load timed out after 10 seconds')), AMAP_TIMEOUT_MS);
       return;
     }
     const script = document.createElement('script');
     script.dataset.amapJsApi = '2';
     script.src = `https://webapi.amap.com/maps?v=2.0&key=${encodeURIComponent(key)}&plugin=AMap.Driving`;
-    script.onload = finish;
-    script.onerror = () => reject(new Error('AMap script network load failed'));
+    script.onload = () => finish(script);
+    script.onerror = () => fail(script, new Error('AMap script network load failed'));
     document.head.appendChild(script);
+    timer = window.setTimeout(() => fail(script, new Error('AMap script load timed out after 10 seconds')), AMAP_TIMEOUT_MS);
   }).catch((error) => {
     amapLoaderPromise = undefined;
     throw error;
   });
   return amapLoaderPromise;
+}
+
+export function resetAmapJsApiLoader() {
+  amapLoaderPromise = undefined;
+  if (!window.AMap) document.querySelectorAll(AMAP_SCRIPT_SELECTOR).forEach((script) => script.remove());
+}
+
+function logAmapLoader(event: string, key: string) {
+  console.info('[AMap JS API]', { event, origin: window.location.origin, hasAMap: Boolean(window.AMap), hasSecurityConfig: Boolean(window._AMapSecurityConfig?.securityJsCode), keyConfigured: Boolean(key), keyLength: key.length });
 }
 
 export function splitDrivingPoints(points: Array<[number, number]>, maxWaypoints = AMAP_MAX_WAYPOINTS) {
@@ -67,14 +85,14 @@ export function splitDrivingPoints(points: Array<[number, number]>, maxWaypoints
 
 export function classifyDrivingFailure(failure: DrivingSearchFailure): Exclude<RoadPlanStatus, 'loading' | 'planned'> {
   const text = `${failure.status} ${stringifyFailure(failure.result)} ${stringifyFailure(failure.error)}`.toLowerCase();
-  if (/invalid_user_key|userkey|security|auth|permission|forbidden|白名单|key/.test(text)) return 'auth-error';
+  if (/invalid_user_key|invalid_user_domain|userkey|security|auth|permission|forbidden|domain|白名单|key/.test(text)) return 'auth-error';
   if (/network|timeout|fetch|load|script|connection|internet|网络/.test(text)) return 'network-error';
   if (failure.status === 'no_data' || /no[_ -]?data|zero_results|无结果/.test(text)) return 'no-data';
   return 'fallback';
 }
 
 export async function planAmapDrivingRoute(AMap: any, points: RoutePoint[]): Promise<DrivingPlanResult> {
-  const coordinates = points.map((point) => [point.lng, point.lat] as [number, number]);
+  const coordinates = points.map((point) => [point.roadAccessLng ?? point.lng, point.roadAccessLat ?? point.lat] as [number, number]);
   const segments = splitDrivingPoints(coordinates);
   if (!segments.length) throw { status: 'no_data', result: 'Route needs at least two points' } satisfies DrivingSearchFailure;
 
@@ -114,17 +132,46 @@ function searchDrivingSegment(driving: any, coordinates: Array<[number, number]>
     const start = coordinates[0];
     const end = coordinates[coordinates.length - 1];
     const waypoints = coordinates.slice(1, -1);
+    const timer = window.setTimeout(() => reject({ status: 'timeout', error: 'AMap.Driving search timed out' } satisfies DrivingSearchFailure), 12_000);
     try {
       driving.search(start, end, { waypoints }, (status: string, result: any) => {
         if (status === 'complete' && result?.routes?.[0]) {
+          window.clearTimeout(timer);
           resolve(result.routes[0]);
           return;
         }
+        window.clearTimeout(timer);
         reject({ status, result, error: result?.info ?? result?.message } satisfies DrivingSearchFailure);
       });
     } catch (error) {
+      window.clearTimeout(timer);
       reject({ status: 'error', error } satisfies DrivingSearchFailure);
     }
+  });
+}
+
+export function loadAmapPlugin(AMap: any, plugin = 'AMap.Driving', timeoutMs = AMAP_TIMEOUT_MS) {
+  return new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject({ status: 'timeout', error: `${plugin} plugin load timed out` } satisfies DrivingSearchFailure), timeoutMs);
+    try { AMap.plugin(plugin, () => { window.clearTimeout(timer); resolve(); }); }
+    catch (error) { window.clearTimeout(timer); reject({ status: 'error', error } satisfies DrivingSearchFailure); }
+  });
+}
+
+export function convertGpsPoint(AMap: any, point: RoutePoint, timeoutMs = AMAP_TIMEOUT_MS): Promise<RoutePoint> {
+  if (point.coordinateSystem !== 'wgs84') return Promise.resolve(point);
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject({ status: 'timeout', error: 'AMap.convertFrom timed out' } satisfies DrivingSearchFailure), timeoutMs);
+    try {
+      AMap.convertFrom([point.lng, point.lat], 'gps', (status: string, result: any) => {
+        window.clearTimeout(timer);
+        const converted = result?.locations?.[0];
+        if (status !== 'complete' || !converted) { reject({ status, result, error: 'GPS coordinate conversion failed' } satisfies DrivingSearchFailure); return; }
+        const lng = typeof converted.getLng === 'function' ? converted.getLng() : Number(converted.lng ?? converted[0]);
+        const lat = typeof converted.getLat === 'function' ? converted.getLat() : Number(converted.lat ?? converted[1]);
+        resolve({ ...point, lng, lat, roadAccessLng: lng, roadAccessLat: lat, coordinateSystem: 'gcj02' });
+      });
+    } catch (error) { window.clearTimeout(timer); reject({ status: 'error', error } satisfies DrivingSearchFailure); }
   });
 }
 

@@ -148,14 +148,14 @@ export function normalizeRequest(input: TripRequest): TripRequest {
 }
 
 export function parseTravelRequest(text: string, base = defaultTripRequest()): ParseResult {
-  const next: TripRequest = { ...base, interests: [...base.interests], dietaryRestrictions: [...base.dietaryRestrictions], specialNeeds: [...base.specialNeeds], freeText: text };
+  const next: TripRequest = { ...base, interests: [], travelerType: '朋友', dietaryRestrictions: [], specialNeeds: [], freeText: text, startDate: base.startDate, endDate: base.endDate };
   const tags: ParsedTag[] = [];
   const warnings: string[] = [];
   const city = CITY_NAMES.find((name) => text.includes(name));
   if (city) { next.destinationCity = city; next.origin = { ...origins[city] }; tags.push({ type: '城市', value: city }); }
   const dayMatch = text.match(/([一二两三四五六七八九十\d]+)天(?:[一二两三四五六七八九十\d]+夜)?/) ?? text.match(/([一二两三四五六七八九十\d]+)日游/);
   if (dayMatch) { next.days = Math.min(15, Math.max(1, chineseNumber(dayMatch[1]))); tags.push({ type: '天数', value: `${next.days}天` }); }
-  const budgetMatch = text.match(/(?:预算\s*|)(\d{2,6})\s*(?:元|块)(?:以内|以下)?/);
+  const budgetMatch = text.match(/(?:预算|人均)\s*(\d{2,6})(?:\s*(?:元|块))?(?:以内|以下)?/) ?? text.match(/(\d{2,6})\s*块(?:以内|以下)?/);
   if (budgetMatch) { next.budget = Number(budgetMatch[1]); tags.push({ type: '预算', value: `${next.budget}元` }); }
   const interestLexicon: Array<[Interest, string[]]> = [
     ['自然风光', ['自然风光', '峡谷', '山水', '云海', '徒步']], ['拍照', ['拍照', '摄影', '旅拍', '出片']],
@@ -163,11 +163,11 @@ export function parseTravelRequest(text: string, base = defaultTripRequest()): P
     ['Citywalk', ['Citywalk', 'citywalk', '城市漫步', '街区漫步']],
   ];
   const detectedInterests = interestLexicon.filter(([, words]) => words.some((word) => text.includes(word))).map(([interest]) => interest);
-  if (detectedInterests.length) next.interests = unique(detectedInterests);
+  next.interests = unique(detectedInterests);
   next.interests.forEach((value) => tags.push({ type: '兴趣', value }));
   const traveler = TRAVELERS.find((item) => text.includes(item));
   if (traveler) { next.travelerType = traveler; tags.push({ type: '人群', value: traveler }); }
-  if (/孩子|儿童|亲子/.test(text)) { next.travelerType = '家庭'; next.specialNeeds = unique([...next.specialNeeds, '带儿童']); tags.push({ type: '特殊需求', value: '带儿童' }); }
+  if (text.includes('带儿童')) { next.travelerType = '家庭'; next.specialNeeds.push('带儿童'); tags.push({ type: '人群', value: '家庭' }); tags.push({ type: '特殊需求', value: '带儿童' }); }
   if (/老人|少爬坡|行动不便/.test(text)) { next.specialNeeds = unique([...next.specialNeeds, '行动不便']); tags.push({ type: '特殊需求', value: '行动不便' }); }
   if (/雨天|下雨/.test(text)) { next.specialNeeds = unique([...next.specialNeeds, '雨天方案']); tags.push({ type: '特殊需求', value: '雨天方案' }); }
   if (/不吃辣|不要辣|忌辣/.test(text)) { next.dietaryRestrictions = unique([...next.dietaryRestrictions, '不吃辣']); tags.push({ type: '饮食限制', value: '不吃辣' }); }
@@ -200,8 +200,8 @@ export function generateTripPlan(requestInput: TripRequest, previous?: TripPlan 
   const points = calculateTimeline(limited, departureTime);
   const now = new Date().toISOString();
   const requestHash = stableHash(request);
-  const route = { ...rawRoute, points, title: cleanDuplicateTitle(rawRoute.title, request.interests), recommendedStartTime: departureTime } as TripPlan['route'];
-  const dailyRecords = Array.from({ length: request.days }, (_, index) => previous?.dailyRecords[index] ?? ({ day: index + 1, date: addDaysIso(request.startDate, index), note: '', checkedPointIds: [] }));
+  const route = { ...rawRoute, points, title: cleanDuplicateTitle(rawRoute.title, request.interests), recommendedStartTime: departureTime, sceneryAnalysis: { ...rawRoute.sceneryAnalysis, socialCopy: buildSocialCopy(request) } } as TripPlan['route'];
+  const dailyRecords = Array.from({ length: request.days }, (_, index) => ({ ...(previous?.dailyRecords[index] ?? { note: '', checkedPointIds: [] }), day: index + 1, date: addDaysIso(request.startDate, index) }));
   return {
     id: `plan-${requestHash}`,
     generationSource: 'rules-v1',
@@ -211,7 +211,7 @@ export function generateTripPlan(requestInput: TripRequest, previous?: TripPlan 
     content,
     route,
     settings: { targetPointCount, targetDurationMinutes: totalPlanMinutes(points), departureTime },
-    budgetItems: previous?.budgetItems ?? content.budget.map((row, index) => ({ ...row, id: `budget-${index}` })),
+    budgetItems: previous && previous.requestSnapshot.budget === request.budget ? previous.budgetItems : content.budget.map((row, index) => ({ ...row, id: `budget-${index}` })),
     dailyRecords,
     pointNotes: previous?.pointNotes ?? {},
     foodRecommendations: filterFoods(request),
@@ -265,9 +265,10 @@ export function updatePlanDates(plan: TripPlan, request: TripRequest): TripPlan 
 
 export function budgetTotal(items: BudgetItem[]) { return items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0); }
 export function todayIso() { return toIsoDate(new Date()); }
-export function addDaysIso(value: string, days: number) { const date = parseIsoDate(value); date.setDate(date.getDate() + days); return toIsoDate(date); }
-export function daysBetween(start: string, end: string) { return Math.floor((parseIsoDate(end).getTime() - parseIsoDate(start).getTime()) / 86400000) + 1; }
-export function isIsoDate(value: string) { return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T00:00:00`).getTime()); }
+export function parseLocalDate(value: string) { const [year, month, day] = value.split('-').map(Number); return new Date(year, month - 1, day); }
+export function addDaysIso(value: string, days: number) { const date = parseLocalDate(value); date.setDate(date.getDate() + days); return toIsoDate(date); }
+export function daysBetween(start: string, end: string) { return Math.floor((parseLocalDate(end).getTime() - parseLocalDate(start).getTime()) / 86400000) + 1; }
+export function isIsoDate(value: string) { if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false; const parsed = parseLocalDate(value); return toIsoDate(parsed) === value; }
 
 function filterFoods(request: TripRequest): FoodRecommendation[] {
   let rows = foodLibrary[request.destinationCity].map((item, index) => ({ ...item, id: `food-${request.destinationCity}-${index}`, businessStatus: '非实时，出发前核验' as const }));
@@ -294,12 +295,16 @@ function haversine(lat1: number, lng1: number, lat2: number, lng2: number) {
 function totalPlanMinutes(points: PlannedRoutePoint[]) { return points.reduce((sum, point) => sum + point.durationMinutes + point.travelMinutesToNext, 0); }
 function toMinutes(value: string) { const [hour, minute] = value.split(':').map(Number); return (hour || 0) * 60 + (minute || 0); }
 function fromMinutes(value: number) { const normalized = ((value % 1440) + 1440) % 1440; return `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`; }
-function parseIsoDate(value: string) { return new Date(`${value}T00:00:00`); }
 function toIsoDate(date: Date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 function chineseNumber(value: string) { if (/^\d+$/.test(value)) return Number(value); const map: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 }; if (value.length === 1) return map[value] ?? 1; if (value.startsWith('十')) return 10 + (map[value[1]] ?? 0); if (value.includes('十')) return (map[value[0]] ?? 0) * 10 + (map[value[2]] ?? 0); return map[value] ?? 1; }
 function stableHash(value: unknown) { const text = JSON.stringify(value); let hash = 2166136261; for (let index = 0; index < text.length; index += 1) { hash ^= text.charCodeAt(index); hash = Math.imul(hash, 16777619); } return (hash >>> 0).toString(36); }
 function unique<T>(items: T[]) { return [...new Set(items)]; }
 function uniqueBy<T>(items: T[], key: (item: T) => string) { const seen = new Set<string>(); return items.filter((item) => { const value = key(item); if (seen.has(value)) return false; seen.add(value); return true; }); }
 function cleanDuplicateTitle(title: string, interests: Interest[]) { const [first, second] = unique(interests); if (!first) return title; const suffix = second ? `${first} × ${second}` : first; return title.replace(/：.*$/, `：${suffix}`); }
+
+export function buildSocialCopy(request: TripRequest) {
+  const interests = request.interests.length ? request.interests.join('、') : '轻松游';
+  return `${request.destinationCity}${request.days}天旅行计划已生成：总预算${request.budget}元，重点安排${interests}。路线会按当前条件同步更新，出发前请再次核验开放时间与交通状态。`;
+}
 
 export type PersistedAppState = { version: 2; request: TripRequest; plan: TripPlan | null; journalEntries: JournalEntry[] };

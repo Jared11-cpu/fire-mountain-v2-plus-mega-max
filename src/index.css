@@ -211,6 +211,12 @@ body {
   border-radius: 999px;
 }
 
+.amap-smart-marker.is-selected,
+.amap-smart-marker[aria-current="location"] {
+  transform: scale(1.18);
+  box-shadow: 0 12px 28px rgba(18, 34, 42, .3), 0 0 0 5px #fff, 0 0 0 9px rgba(211, 82, 54, .48);
+}
+
 .amap-marker-label {
   border: 0;
   background: transparent;

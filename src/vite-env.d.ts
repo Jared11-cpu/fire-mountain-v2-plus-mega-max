@@ -10,3 +10,8 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+interface Window {
+  AMap?: any;
+  _AMapSecurityConfig?: { securityJsCode: string };
+}

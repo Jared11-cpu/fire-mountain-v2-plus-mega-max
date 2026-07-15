@@ -207,7 +207,20 @@ function makePoint(
   photoTip: string,
   recordTip: string,
 ): RoutePoint {
-  return { id, name, type, city, lat, lng, time, stayMinutes, reason, photoTip, recordTip, ...pointMedia[name] };
+  const roadAccess = getRoadAccessCoordinates(name);
+  return { id, name, type, city, lat, lng, time, stayMinutes, reason, photoTip, recordTip, ...(roadAccess ? { roadAccessLat: roadAccess[0], roadAccessLng: roadAccess[1] } : {}), coordinateSystem: 'gcj02', ...pointMedia[name] };
+}
+
+// 景区内部、步行街与观景台使用可驾车入口参与 Driving；地图 Marker 仍保留景点本身坐标。
+function getRoadAccessCoordinates(name: string): [number, number] | undefined {
+  return ({
+    昙华林: [30.5538, 114.3050], 黄鹤楼红墙: [30.5464, 114.3028], 粮道街: [30.5450, 114.3095],
+    坛子岭观景台: [30.8188, 111.0206], '185 平台': [30.8188, 111.0206], 西坝不夜城: [30.7072, 111.2897],
+    恩施大峡谷游客中心: [30.4035, 109.1905], 七星寨栈道: [30.4035, 109.1905], 云龙地缝瀑布: [30.4035, 109.1905], 峡谷民宿观景台: [30.3982, 109.2050],
+    荆州博物馆: [30.3472, 112.1858], 宾阳楼: [30.3522, 112.1951], 古城墙步道: [30.3548, 112.1925],
+    襄阳古城北街: [32.0158, 112.1468], 古隆中: [31.9872, 112.0469], 唐城影视基地: [32.0042, 112.1800],
+    黄石国家矿山公园: [30.2048, 114.9027], 矿冶主题展区: [30.2048, 114.9027], 磁湖岸线: [30.2090, 115.0212], 团城山公园: [30.2044, 115.0290],
+  } satisfies Record<string, [number, number]>)[name];
 }
 
 function makeRoute(

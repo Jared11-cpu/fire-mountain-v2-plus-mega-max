@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -25,27 +25,26 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - name: Setup GitHub Pages
+      - name: Configure Pages
         uses: actions/configure-pages@v5
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm ci
+
+      - name: Unit and component tests
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
 
       - name: Build static site
         env:
-          VITE_AMAP_ENABLED: ${{ vars.VITE_AMAP_ENABLED || 'false' }}
-          VITE_AMAP_KEY: ${{ secrets.VITE_AMAP_KEY || vars.VITE_AMAP_KEY }}
-          VITE_AMAP_SECURITY_CODE: ${{ secrets.VITE_AMAP_SECURITY_CODE || vars.VITE_AMAP_SECURITY_CODE }}
-        run: pnpm build:static
-
-      - name: Disable Jekyll processing
-        run: touch dist/.nojekyll
+          VITE_AMAP_ENABLED: ${{ vars.VITE_AMAP_ENABLED || 'true' }}
+          VITE_AMAP_KEY: ${{ secrets.VITE_AMAP_KEY }}
+          VITE_AMAP_SECURITY_CODE: ${{ secrets.VITE_AMAP_SECURITY_CODE }}
+        run: npm run build:static
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

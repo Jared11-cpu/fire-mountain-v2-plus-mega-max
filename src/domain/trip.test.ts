@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addDaysIso, budgetTotal, calculateTimeline, daysBetween, decodeSharePlan, defaultTripRequest, encodeSharePlan, generateTripPlan, parseTravelRequest } from './trip';
+import { addDaysIso, budgetTotal, buildSocialCopy, calculateTimeline, daysBetween, decodeSharePlan, defaultTripRequest, encodeSharePlan, generateTripPlan, parseLocalDate, parseTravelRequest } from './trip';
 import type { RoutePoint } from '../types/route';
 
 describe('parseTravelRequest', () => {
@@ -26,12 +26,34 @@ describe('parseTravelRequest', () => {
     expect(result.request.interests).toEqual(['自然风光', '拍照']);
     expect(result.request.dietaryRestrictions).toContain('不吃辣');
   });
+
+  it.each(['预算1200', '预算1200元', '1200块', '人均1200'])('识别预算写法 %s', (budgetText) => {
+    expect(parseTravelRequest(`武汉三天，${budgetText}`).request.budget).toBe(1200);
+  });
+
+  it('每次从文本重新生成标签，同时保留手动日期', () => {
+    const base = { ...defaultTripRequest('武汉'), budget: 888, dietaryRestrictions: ['素食'] as const, specialNeeds: ['行动不便'] as const, startDate: '2026-07-14', endDate: '2026-07-15' };
+    const result = parseTravelRequest('武汉三天，预算1200，喜欢历史文化和美食，不吃辣，带儿童，雨天方案', base as never);
+    expect(result.request).toMatchObject({ budget: 1200, travelerType: '家庭', startDate: '2026-07-14', endDate: '2026-07-16' });
+    expect(result.request.interests).toEqual(['美食', '历史文化']);
+    expect(result.request.dietaryRestrictions).toEqual(['不吃辣']);
+    expect(result.request.specialNeeds).toEqual(['带儿童', '雨天方案']);
+  });
+
+  it('未明确输入带儿童时不自动改为家庭', () => {
+    expect(parseTravelRequest('武汉亲子美食三日游').request.travelerType).toBe('朋友');
+  });
 });
 
 describe('dates, timeline and plan integrity', () => {
   it('计算日期并支持反算天数', () => {
     expect(addDaysIso('2026-07-13', 2)).toBe('2026-07-15');
     expect(daysBetween('2026-07-13', '2026-07-15')).toBe(3);
+  });
+
+  it('纯日期按本地年月日构造，不发生 UTC 少一天', () => {
+    const date = parseLocalDate('2026-07-14');
+    expect([date.getFullYear(), date.getMonth() + 1, date.getDate()]).toEqual([2026, 7, 14]);
   });
 
   it('时间线严格递增，恩施远距离路段不少于90分钟', () => {
@@ -54,6 +76,15 @@ describe('dates, timeline and plan integrity', () => {
     expect(plan.requestSnapshot.interests).toEqual(['拍照']);
     expect(plan.route.title).not.toContain('拍照 × 拍照');
     expect(budgetTotal([{ id: '1', item: 'A', amount: 20, note: '' }, { id: '2', item: 'B', amount: 30, note: '' }])).toBe(50);
+  });
+
+  it('复制文案随当前城市、天数、预算和兴趣更新', () => {
+    const request = { ...defaultTripRequest('武汉'), days: 3, budget: 1200, interests: ['历史文化', '美食'] as const };
+    const copy = buildSocialCopy(request as never);
+    expect(copy).toContain('武汉3天');
+    expect(copy).toContain('1200元');
+    expect(copy).toContain('历史文化、美食');
+    expect(generateTripPlan(request as never).route.sceneryAnalysis.socialCopy).toBe(copy);
   });
 
   it('分享载荷可恢复且排除真实足迹字段', () => {

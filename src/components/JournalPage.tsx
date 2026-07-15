@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, BookOpen, Camera, CheckCircle2, ImagePlus, Loader2, MapPin, Navigation, Route as RouteIcon, Trash2, UploadCloud, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, Camera, Download, ImagePlus, Loader2, MapPin, Route as RouteIcon, UploadCloud, X } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { cities, type CityName } from '../data/mockData';
-import { loadAmapJsApi, planAmapDrivingRoute } from '../services/amapDriving';
+import { parseLocalDate } from '../domain/trip';
 import { clearJournal, compressPhoto, deletePhoto, loadPhoto, savePhoto } from '../services/journalStorage';
 import { useTrip } from '../state/tripStore';
-import type { JournalEntry, RoutePoint } from '../types/route';
+import type { JournalEntry } from '../types/route';
 
 type PendingPhoto = { id: string; file: File; preview: string; progress: number; status: 'pending' | 'compressing' | 'saved' | 'error'; error?: string };
 type JournalMapEntry = JournalEntry & { photoUrl?: string; isExample?: boolean };
@@ -25,6 +25,7 @@ export function JournalPage() {
   const pendingRef = useRef<PendingPhoto[]>([]);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [exportingPoster, setExportingPoster] = useState(false);
   const [formError, setFormError] = useState('');
 
   useEffect(() => { pendingRef.current = pending; }, [pending]);
@@ -102,6 +103,18 @@ export function JournalPage() {
     catch (error) { console.error('Journal clear failed', error); notify('清空失败，请重试。', 'error'); }
   };
 
+  const savePoster = async () => {
+    if (visibleEntries.length === 0) return;
+    setExportingPoster(true);
+    try {
+      await downloadJournalPoster(visibleEntries, mode);
+      notify('手写路线海报已保存为 PNG。', 'success');
+    } catch (error) {
+      console.error('Journal poster export failed', error);
+      notify('海报生成失败，请稍后重试。', 'error');
+    } finally { setExportingPoster(false); }
+  };
+
   if (entryId) return <JournalDetail entry={entries.find((entry) => entry.id === entryId)} photoUrls={photoUrls} onBack={() => navigate('/journal')} />;
 
   return <main className="section-pad py-10"><div className="mx-auto max-w-7xl">
@@ -109,7 +122,7 @@ export function JournalPage() {
 
     <div className="mt-8 grid items-start gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(300px,3fr)]">
       <section aria-label="旅行手账地图" className="journal-map journal-a4-page order-1 flex min-w-0 flex-col overflow-hidden rounded-[1.6rem] border border-ink/8 p-5 shadow-[0_28px_75px_rgba(18,34,42,.13)] md:p-7">
-        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><div className="flex items-center gap-2 text-xs font-black tracking-[.2em] text-river"><RouteIcon className="h-4 w-4"/>MY HUBEI ROUTE</div><h2 className="journal-handwriting mt-2 text-4xl font-black">我的旅行路线手账</h2><p className="mt-2 text-xs font-bold text-ink/45">真实足迹与示例路线分开查看，只有你保存的记录计入统计。</p></div><div className="flex rounded-full bg-white/70 p-1 shadow-sm" role="tablist">{(['real', 'example'] as const).map((item) => <button key={item} type="button" role="tab" aria-selected={mode === item} onClick={() => setMode(item)} className={`rounded-full px-4 py-2 text-xs font-black transition ${mode === item ? 'bg-ink text-white' : 'text-ink/50'}`}>{item === 'real' ? `真实足迹 ${entries.length}` : `示例路线 ${examplePoints.length}`}</button>)}</div></div>
+        <div><div className="flex items-center gap-2 text-xs font-black tracking-[.2em] text-river"><RouteIcon className="h-4 w-4"/>MY HUBEI ROUTE</div><h2 className="journal-handwriting mt-2 text-4xl font-black">我的旅行路线手账</h2><p className="mt-2 text-xs font-bold text-ink/45">湖北轮廓、足迹顺序与手账便签会一起保存到海报。</p><div className="mt-4 flex flex-wrap items-center justify-between gap-2"><div className="flex rounded-full bg-white/70 p-1 shadow-sm" role="tablist">{(['real', 'example'] as const).map((item) => <button key={item} type="button" role="tab" aria-selected={mode === item} onClick={() => setMode(item)} className={`rounded-full px-4 py-2 text-xs font-black transition ${mode === item ? 'bg-ink text-white' : 'text-ink/50'}`}>{item === 'real' ? `真实足迹 ${entries.length}` : `示例路线 ${examplePoints.length}`}</button>)}</div><button type="button" disabled={visibleEntries.length === 0 || exportingPoster} onClick={savePoster} className="inline-flex items-center gap-2 rounded-full bg-tower px-4 py-2.5 text-xs font-black text-white shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40"><Download className="h-4 w-4"/>{exportingPoster ? '正在绘制…' : '保存手写海报'}</button></div></div>
         <JournalRouteMap entries={visibleEntries} mode={mode} onOpen={(id) => mode === 'real' && navigate(`/journal/${id}`)} />
         <div className="mt-5 flex items-center justify-between border-t border-ink/8 pt-4 text-xs font-bold text-ink/45"><span>{mode === 'real' ? '点击地图便签，翻开这一站的完整手账。' : '示例路线不计入真实足迹。'}</span>{entries.length > 0 && mode === 'real' && <button type="button" onClick={clearAll} className="font-black text-red-600">清空真实记录</button>}</div>
       </section>
@@ -125,77 +138,86 @@ export function JournalPage() {
 }
 
 function JournalRouteMap({ entries, mode, onOpen }: { entries: JournalMapEntry[]; mode: 'real' | 'example'; onOpen: (id: string) => void }) {
-  const container = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>();
-  const [status, setStatus] = useState(entries.length ? '正在连接高德道路地图…' : '还没有真实记录，先在右侧写下第一站。');
-  const [showPaper, setShowPaper] = useState(false);
-  const key = import.meta.env.VITE_AMAP_KEY;
-  const securityCode = import.meta.env.VITE_AMAP_SECURITY_CODE;
-  const signature = entries.map((entry) => `${entry.id}:${entry.lng},${entry.lat}:${entry.photoUrl ?? ''}`).join('|');
-
-  useEffect(() => {
-    let disposed = false;
-    let drivingInstances: any[] = [];
-    let overlays: any[] = [];
-    const destroy = () => { drivingInstances.forEach((item) => item?.clear?.()); drivingInstances = []; if (mapRef.current) { if (overlays.length) mapRef.current.remove?.(overlays); mapRef.current.clearMap?.(); mapRef.current.destroy?.(); } mapRef.current = undefined; overlays = []; };
-    async function mount() {
-      destroy();
-      if (!container.current || entries.length === 0) { if (!disposed) { setStatus(mode === 'real' ? '还没有真实记录，先在右侧写下第一站。' : '请先生成一条示例路线。'); setShowPaper(true); } return; }
-      if (!key || import.meta.env.VITE_AMAP_ENABLED === 'false') { if (!disposed) { setStatus('未配置高德地图，当前显示纸面点位顺序。'); setShowPaper(true); } return; }
-      try {
-        const AMap = await loadAmapJsApi(key, securityCode);
-        if (disposed || !container.current) return;
-        const routePoints = entries.map(toRoutePoint);
-        const map = new AMap.Map(container.current, { zoom: 10, center: [routePoints[0].lng, routePoints[0].lat], viewMode: '2D', resizeEnable: true, mapStyle: 'amap://styles/normal', features: ['bg', 'road', 'building', 'point'] });
-        mapRef.current = map;
-        setShowPaper(false);
-        const markers = entries.map((entry, index) => { const marker = new AMap.Marker({ position: [routePoints[index].lng, routePoints[index].lat], anchor: 'bottom-center', title: entry.pointName, content: createJournalMarker(entry, index, () => onOpen(entry.id)), offset: new AMap.Pixel(0, 0) }); marker.on('click', () => onOpen(entry.id)); map.add(marker); return marker; });
-        overlays.push(...markers);
-        if (routePoints.length > 1) {
-          try {
-            const result = await planAmapDrivingRoute(AMap, routePoints);
-            if (disposed) { result.drivingInstances.forEach((item) => item?.clear?.()); return; }
-            drivingInstances = result.drivingInstances;
-            const line = new AMap.Polyline({ path: result.path, strokeColor: '#0E6B72', strokeWeight: 6, strokeOpacity: .9, showDir: true, lineJoin: 'round', lineCap: 'round', zIndex: 40 }); map.add(line); overlays.push(line);
-            setStatus(`高德道路手账 · ${(result.distanceMeters / 1000).toFixed(1)} km`);
-          } catch (error) {
-            console.error('Journal AMap driving failed', error);
-            const line = new AMap.Polyline({ path: routePoints.map((point) => [point.lng, point.lat]), strokeColor: '#9b6b5c', strokeWeight: 4, strokeOpacity: .75, strokeStyle: 'dashed', strokeDasharray: [9, 9] }); map.add(line); overlays.push(line);
-            setStatus('道路规划失败 · 虚线仅表示记录先后顺序');
-          }
-        } else setStatus('高德真实地图 · 当前共 1 个记录点');
-        map.setFitView?.(overlays, false, [95, 95, 95, 95]);
-      } catch (error) {
-        console.error('Journal AMap load failed', error);
-        if (!disposed) { setStatus('地图加载失败 · 当前显示纸面点位顺序'); setShowPaper(true); }
-      }
-    }
-    mount();
-    return () => { disposed = true; destroy(); };
-  }, [key, securityCode, signature, mode, onOpen]);
-
+  const status = entries.length ? `${mode === 'real' ? '我的真实足迹' : '行程示例'} · ${entries.length} 站 · 湖北轮廓示意` : mode === 'real' ? '还没有真实记录，先在右侧写下第一站。' : '请先生成一条示例路线。';
   return <div className="relative mt-5 min-h-[620px] flex-1 overflow-hidden rounded-[1.15rem] border border-ink/8 bg-[#e3eee9]">
-    <div ref={container} className="absolute inset-0" />
-    {showPaper && <JournalPaperMap entries={entries} onOpen={onOpen} />}
+    <JournalPaperMap entries={entries} onOpen={onOpen} />
     <div className="pointer-events-none absolute left-4 top-4 z-20 rounded-full bg-white/92 px-3 py-2 text-[11px] font-black text-river shadow-lg backdrop-blur">{status}</div>
   </div>;
 }
 
 function JournalPaperMap({ entries, onOpen }: { entries: JournalMapEntry[]; onOpen: (id: string) => void }) {
-  return <div className="journal-notebook-lines absolute inset-0 p-8 pt-20">{entries.length === 0 ? <div className="grid h-full place-items-center text-center"><div><MapPin className="mx-auto h-10 w-10 text-river/35"/><p className="journal-handwriting mt-3 text-xl text-ink/45">第一站，等你落笔。</p></div></div> : <div className="grid gap-4 md:grid-cols-2">{entries.map((entry, index) => <button key={entry.id} type="button" onClick={() => onOpen(entry.id)} className="flex items-center gap-3 rounded-2xl border border-ink/10 bg-white/90 p-3 text-left shadow-sm"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-river font-black text-white">{index + 1}</span>{entry.photoUrl && <img src={entry.photoUrl} alt="" className="h-14 w-14 rounded-xl object-cover"/>}<span className="min-w-0"><strong className="block truncate">{entry.pointName}</strong><em className="journal-handwriting mt-1 line-clamp-2 block text-sm not-italic text-ink/55">{entry.note || '这一站等待你的心得。'}</em></span></button>)}</div>}</div>;
+  const points = layoutJournalPosterPoints(entries);
+  const route = points.map((point) => `${point.x},${point.y}`).join(' ');
+  return <div className="journal-notebook-lines absolute inset-0 overflow-auto px-4 pb-5 pt-16 md:px-7">
+    <div className="relative mx-auto max-w-[780px] overflow-hidden rounded-[1.2rem] border border-river/15 bg-[#fffdf5]/90 shadow-[0_18px_50px_rgba(18,34,42,.10)]">
+      <svg viewBox="0 0 800 520" role="img" aria-label="湖北轮廓与旅行足迹路线图" className="block w-full">
+        <defs><filter id="journal-rough"><feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="2" seed="7" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="1.5"/></filter><pattern id="journal-grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#0e6b72" strokeOpacity=".055" strokeWidth="1"/></pattern></defs>
+        <rect width="800" height="520" fill="#fffdf5"/><rect width="800" height="520" fill="url(#journal-grid)"/>
+        <text x="42" y="48" fill="#0e6b72" fontSize="13" fontWeight="800" letterSpacing="4">HUBEI · TRAVEL NOTES</text>
+        <text x="758" y="48" fill="#1c2f38" fillOpacity=".42" fontSize="12" textAnchor="end">湖北轮廓示意 · 非导航地图</text>
+        <path d={HUBEI_OUTLINE_PATH} fill="#dceee5" stroke="#0e6b72" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" filter="url(#journal-rough)"/>
+        <path d="M155 292 C235 278 296 308 359 292 C430 274 512 314 650 277" fill="none" stroke="#63aeb8" strokeWidth="8" strokeOpacity=".55" strokeLinecap="round" filter="url(#journal-rough)"/>
+        <text x="606" y="270" fill="#0e6b72" fillOpacity=".55" fontSize="12">长江</text>
+        {points.length > 1 && <><polyline points={route} fill="none" stroke="#fffdf5" strokeWidth="12" strokeLinecap="round" strokeLinejoin="round"/><polyline points={route} fill="none" stroke="#c94f3d" strokeWidth="5" strokeDasharray="12 10" strokeLinecap="round" strokeLinejoin="round" filter="url(#journal-rough)"/></>}
+        {points.map((point, index) => <g key={point.entry.id} className="cursor-pointer" onClick={() => onOpen(point.entry.id)} role="button" aria-label={`${point.entry.pointName}，第${index + 1}站`}>
+          <circle cx={point.x} cy={point.y} r="18" fill="#fffdf5" stroke="#0e6b72" strokeWidth="3"/><circle cx={point.x} cy={point.y} r="13" fill="#0e6b72"/><text x={point.x} y={point.y + 5} fill="white" fontSize="13" fontWeight="900" textAnchor="middle">{index + 1}</text>
+          <text x={point.x + point.labelDx} y={point.y + point.labelDy} fill="#1c2f38" fontSize="13" fontWeight="800" textAnchor={point.labelDx < 0 ? 'end' : 'start'} paintOrder="stroke" stroke="#fffdf5" strokeWidth="5">{point.entry.pointName}</text>
+        </g>)}
+        {entries.length === 0 && <g><MapPin x="374" y="218" width="52" height="52" color="#0e6b72" opacity=".3"/><text x="400" y="300" fill="#1c2f38" fillOpacity=".45" fontSize="22" fontFamily="KaiTi, STKaiti, serif" textAnchor="middle">第一站，等你落笔。</text></g>}
+        <path d="M54 466 Q167 445 271 466 T489 464 T746 456" fill="none" stroke="#c94f3d" strokeOpacity=".45" strokeWidth="2"/>
+        <text x="54" y="493" fill="#1c2f38" fillOpacity=".5" fontSize="13" fontFamily="KaiTi, STKaiti, serif">走过的地方，会在纸上重新相遇。</text>
+      </svg>
+    </div>
+    {entries.length > 0 && <div className="mx-auto mt-4 grid max-w-[780px] gap-3 md:grid-cols-2">{entries.slice(0, 8).map((entry, index) => <button key={entry.id} type="button" onClick={() => onOpen(entry.id)} className={`flex min-w-0 items-center gap-3 rounded-2xl border border-ink/10 bg-white/90 p-3 text-left shadow-sm ${index % 2 ? 'rotate-[.4deg]' : 'rotate-[-.4deg]'}`}><span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-river font-black text-white">{index + 1}</span>{entry.photoUrl && <img src={entry.photoUrl} alt="" className="h-14 w-14 rounded-xl object-cover"/>}<span className="min-w-0"><strong className="block truncate">{entry.pointName}</strong><em className="journal-handwriting mt-1 line-clamp-2 block text-sm not-italic text-ink/55">{entry.note || '这一站等待你的心得。'}</em></span></button>)}</div>}
+  </div>;
 }
 
-function createJournalMarker(entry: JournalMapEntry, index: number, onOpen: () => void) {
-  const root = document.createElement('button'); root.type = 'button'; root.className = `journal-map-pin ${index % 2 === 0 ? 'journal-map-pin-right' : 'journal-map-pin-left'}`; root.setAttribute('aria-label', `${entry.pointName}，打开旅行手账`); root.addEventListener('click', onOpen);
-  const number = document.createElement('span'); number.className = 'journal-map-pin-number'; number.textContent = String(index + 1); root.appendChild(number);
-  const note = document.createElement('span'); note.className = 'journal-map-note';
-  if (entry.photoUrl) { const image = document.createElement('img'); image.src = entry.photoUrl; image.alt = `${entry.pointName}记录照片`; note.appendChild(image); }
-  const copy = document.createElement('span'); copy.className = 'journal-map-note-copy'; const title = document.createElement('strong'); title.textContent = entry.pointName; const text = document.createElement('em'); text.textContent = entry.note || (entry.isExample ? '示例路线地点' : '这里等你写下自己的感想。'); copy.append(title, text); note.appendChild(copy); root.appendChild(note); return root;
+const HUBEI_OUTLINE_PATH = 'M130 262 C112 220 137 175 190 163 C220 112 288 118 323 86 C372 104 414 82 458 108 C502 92 551 113 571 150 C623 162 674 188 665 229 C697 254 677 297 639 309 C626 352 579 369 533 354 C498 386 442 379 410 353 C365 378 316 365 293 340 C239 354 192 331 184 302 C153 300 133 282 130 262 Z';
+type PosterPoint = { entry: JournalMapEntry; x: number; y: number; labelDx: number; labelDy: number };
+
+export function layoutJournalPosterPoints(entries: JournalMapEntry[]): PosterPoint[] {
+  const placed: PosterPoint[] = [];
+  entries.forEach((entry, index) => {
+    const [fallbackLng, fallbackLat] = cityCoordinates[entry.city];
+    const lng = entry.lng ?? fallbackLng;
+    const lat = entry.lat ?? fallbackLat;
+    let x = 150 + ((lng - 108.3) / 7.9) * 520;
+    let y = 120 + ((33.4 - lat) / 4.4) * 260;
+    const collisions = placed.filter((point) => Math.hypot(point.x - x, point.y - y) < 26).length;
+    if (collisions) { const angle = collisions * 2.15 + index * .65; x += Math.cos(angle) * (24 + collisions * 7); y += Math.sin(angle) * (24 + collisions * 7); }
+    x = Math.max(138, Math.min(674, x)); y = Math.max(96, Math.min(376, y));
+    placed.push({ entry, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, labelDx: x > 520 ? -25 : 25, labelDy: index % 2 ? 28 : -24 });
+  });
+  return placed;
 }
 
-function toRoutePoint(entry: JournalMapEntry, index: number): RoutePoint {
-  const base = cityCoordinates[entry.city]; const lng = entry.lng ?? base[0] + index * .006; const lat = entry.lat ?? base[1] + (index % 2 ? index * .006 : -index * .006);
-  return { id: entry.id, name: entry.pointName, type: index === 0 ? 'start' : 'scenic', city: entry.city, lng, lat, time: '09:00', stayMinutes: 30, reason: entry.note, photoTip: '', recordTip: entry.note, day: entry.day };
+function escapeSvg(value: string) { return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char] ?? char); }
+function truncatePosterText(value: string, max = 28) { const normalized = value.replace(/\s+/g, ' ').trim(); return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized; }
+
+export function buildJournalPosterSvg(entries: JournalMapEntry[], mode: 'real' | 'example') {
+  const points = layoutJournalPosterPoints(entries);
+  const route = points.map((point) => `${point.x},${point.y}`).join(' ');
+  const markers = points.map((point, index) => `<g><circle cx="${point.x}" cy="${point.y}" r="24" fill="#fffaf0" stroke="#0e6b72" stroke-width="5"/><circle cx="${point.x}" cy="${point.y}" r="17" fill="#0e6b72"/><text x="${point.x}" y="${point.y + 7}" text-anchor="middle" fill="#fff" font-size="20" font-weight="900">${index + 1}</text><text x="${point.x + point.labelDx}" y="${point.y + point.labelDy}" text-anchor="${point.labelDx < 0 ? 'end' : 'start'}" fill="#1c2f38" font-size="20" font-weight="800" paint-order="stroke" stroke="#fffaf0" stroke-width="7">${escapeSvg(truncatePosterText(point.entry.pointName, 12))}</text></g>`).join('');
+  const cards = entries.slice(0, 10).map((entry, index) => { const column = index % 2; const row = Math.floor(index / 2); const x = 85 + column * 545; const y = 1020 + row * 118; return `<g transform="translate(${x} ${y}) rotate(${column ? 0.5 : -0.5})"><rect width="510" height="96" rx="20" fill="#fffdf7" stroke="#1c2f38" stroke-opacity=".12" stroke-width="2"/><circle cx="45" cy="48" r="25" fill="#0e6b72"/><text x="45" y="56" text-anchor="middle" fill="#fff" font-size="21" font-weight="900">${index + 1}</text><text x="85" y="38" fill="#1c2f38" font-size="23" font-weight="900">${escapeSvg(truncatePosterText(entry.pointName, 16))}</text><text x="85" y="70" fill="#1c2f38" fill-opacity=".62" font-size="18" font-family="KaiTi, STKaiti, serif">${escapeSvg(truncatePosterText(entry.note || '这一站，值得被记住。'))}</text></g>`; }).join('');
+  const citiesText = Array.from(new Set(entries.map((entry) => entry.city))).join(' · ') || '等待出发';
+  const dates = entries.map((entry) => entry.visitedAt).filter(Boolean).sort();
+  const lastDate = dates[dates.length - 1];
+  const dateText = dates.length ? dates[0] === lastDate ? dates[0] : `${dates[0]} — ${lastDate}` : new Date().toISOString().slice(0, 10);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="1754" viewBox="0 0 1240 1754"><defs><pattern id="grid" width="42" height="42" patternUnits="userSpaceOnUse"><path d="M42 0H0V42" fill="none" stroke="#0e6b72" stroke-opacity=".045" stroke-width="1"/></pattern><filter id="rough"><feTurbulence type="fractalNoise" baseFrequency=".008" numOctaves="2" seed="7" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="2"/></filter></defs><rect width="1240" height="1754" fill="#f7f1e4"/><rect x="38" y="38" width="1164" height="1678" rx="38" fill="#fffaf0" stroke="#1c2f38" stroke-opacity=".14" stroke-width="3"/><rect x="38" y="38" width="1164" height="1678" rx="38" fill="url(#grid)"/><text x="86" y="112" fill="#0e6b72" font-size="20" font-weight="900" letter-spacing="8">MY HUBEI ROUTE</text><text x="86" y="186" fill="#1c2f38" font-size="58" font-weight="900" font-family="KaiTi, STKaiti, serif">我的旅行路线手账</text><text x="88" y="230" fill="#1c2f38" fill-opacity=".55" font-size="19">${escapeSvg(mode === 'real' ? '真实足迹' : '示例路线')} · ${entries.length} 站 · ${escapeSvg(citiesText)}</text><text x="1154" y="112" text-anchor="end" fill="#1c2f38" fill-opacity=".45" font-size="18">${escapeSvg(dateText)}</text><g transform="translate(0 245) scale(1.55)"><path d="${HUBEI_OUTLINE_PATH}" fill="#dceee5" stroke="#0e6b72" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" filter="url(#rough)"/><path d="M155 292 C235 278 296 308 359 292 C430 274 512 314 650 277" fill="none" stroke="#63aeb8" stroke-width="8" stroke-opacity=".55" stroke-linecap="round"/>${points.length > 1 ? `<polyline points="${route}" fill="none" stroke="#fffaf0" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/><polyline points="${route}" fill="none" stroke="#c94f3d" stroke-width="6" stroke-dasharray="13 11" stroke-linecap="round" stroke-linejoin="round"/>` : ''}${markers}</g><text x="1154" y="976" text-anchor="end" fill="#1c2f38" fill-opacity=".4" font-size="17">湖北轮廓示意 · 足迹按记录顺序连接 · 非导航地图</text>${cards}<path d="M88 1630 Q284 1598 454 1632 T824 1620 T1150 1610" fill="none" stroke="#c94f3d" stroke-opacity=".45" stroke-width="3"/><text x="88" y="1677" fill="#1c2f38" fill-opacity=".56" font-size="25" font-family="KaiTi, STKaiti, serif">走过的地方，会在纸上重新相遇。</text><text x="1152" y="1677" text-anchor="end" fill="#0e6b72" font-size="18" font-weight="800">楚游智导 · 旅行手账</text></svg>`;
+}
+
+async function downloadJournalPoster(entries: JournalMapEntry[], mode: 'real' | 'example') {
+  const svg = buildJournalPosterSvg(entries, mode);
+  const svgUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+  try {
+    const image = new Image();
+    await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error('SVG poster render failed')); image.src = svgUrl; });
+    const canvas = document.createElement('canvas'); canvas.width = 1240; canvas.height = 1754;
+    const context = canvas.getContext('2d'); if (!context) throw new Error('Canvas is unavailable');
+    context.drawImage(image, 0, 0);
+    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((result) => result ? resolve(result) : reject(new Error('PNG export failed')), 'image/png', .94));
+    const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `我的湖北旅行路线手账-${new Date().toISOString().slice(0, 10)}.png`; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } finally { URL.revokeObjectURL(svgUrl); }
 }
 
 function JournalDetail({ entry, photoUrls, onBack }: { entry?: JournalEntry; photoUrls: Record<string, string>; onBack: () => void }) {
@@ -210,5 +232,5 @@ function JournalDetail({ entry, photoUrls, onBack }: { entry?: JournalEntry; pho
   </article></div></main>;
 }
 
-function formatJournalDate(value: string) { const date = new Date(`${value.slice(0, 10)}T00:00:00`); return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(date); }
+function formatJournalDate(value: string) { return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(parseLocalDate(value.slice(0, 10))); }
 function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) { return <div><label htmlFor={htmlFor} className="mb-2 block text-sm font-black text-ink/65">{label}</label>{children}</div>; }

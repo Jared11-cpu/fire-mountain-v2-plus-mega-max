@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyDrivingFailure, extractDrivingPath, planAmapDrivingRoute, splitDrivingPoints } from './amapDriving';
+import { classifyDrivingFailure, convertGpsPoint, extractDrivingPath, loadAmapJsApi, planAmapDrivingRoute, resetAmapJsApiLoader, splitDrivingPoints } from './amapDriving';
 
 describe('AMap Driving helpers', () => {
   it('splits routes beyond the 16-waypoint limit while sharing segment endpoints', () => {
@@ -17,6 +17,7 @@ describe('AMap Driving helpers', () => {
 
   it('distinguishes authentication, network and empty-result failures', () => {
     expect(classifyDrivingFailure({ status: 'error', result: { info: 'INVALID_USER_KEY' } })).toBe('auth-error');
+    expect(classifyDrivingFailure({ status: 'error', result: 'INVALID_USER_DOMAIN' })).toBe('auth-error');
     expect(classifyDrivingFailure({ status: 'error', error: new Error('network timeout') })).toBe('network-error');
     expect(classifyDrivingFailure({ status: 'no_data' })).toBe('no-data');
   });
@@ -36,5 +37,26 @@ describe('AMap Driving helpers', () => {
     expect(searches[1].start).toEqual(searches[0].end);
     expect(result.distanceMeters).toBe(24000);
     expect(result.durationSeconds).toBe(3600);
+  });
+
+  it('uses road-access coordinates for Driving while preserving marker coordinates', async () => {
+    let searchedStart: [number, number] | undefined;
+    class Driving { search(start: [number, number], end: [number, number], _options: unknown, callback: (status: string, result: any) => void) { searchedStart = start; callback('complete', { routes: [{ distance: 1, time: 1, steps: [{ path: [start, end] }] }] }); } }
+    const points = [{ id: 'a', lng: 114, lat: 30, roadAccessLng: 114.1, roadAccessLat: 30.1 }, { id: 'b', lng: 115, lat: 31 }] as any;
+    await planAmapDrivingRoute({ Driving, DrivingPolicy: {} }, points);
+    expect(searchedStart).toEqual([114.1, 30.1]);
+    expect(points[0].lng).toBe(114);
+  });
+
+  it('does not insert the AMap script when the security code is missing', async () => {
+    resetAmapJsApiLoader(); delete window.AMap; delete window._AMapSecurityConfig;
+    await expect(loadAmapJsApi('web-js-key', '')).rejects.toMatchObject({ status: 'auth-error' });
+    expect(document.querySelector('script[data-amap-js-api="2"]')).toBeNull();
+  });
+
+  it('converts a browser GPS point from WGS-84 before planning', async () => {
+    const point = { id: 'gps', lng: 114, lat: 30, coordinateSystem: 'wgs84' } as any;
+    const converted = await convertGpsPoint({ convertFrom: (_position: unknown, source: string, callback: Function) => callback('complete', { locations: [{ lng: 114.006, lat: 30.006 }] }) }, point);
+    expect(converted).toMatchObject({ lng: 114.006, lat: 30.006, coordinateSystem: 'gcj02' });
   });
 });

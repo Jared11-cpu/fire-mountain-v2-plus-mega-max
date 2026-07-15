@@ -40,6 +40,7 @@ function locationToRoutePoint(location: UserLocation | undefined, input: Planner
     city: input.city,
     lat: location.lat,
     lng: location.lng,
+    coordinateSystem: location.status === 'success' ? 'wgs84' : 'gcj02',
     time: '08:30',
     stayMinutes: 10,
     reason: location.status === 'success' ? '浏览器定位获取的真实出发点，后续可接入高德路径规划。' : '手动选择的 Mock 出发点，用于演示路线生成。',
