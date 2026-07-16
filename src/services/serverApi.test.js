@@ -52,6 +52,20 @@ describe('Sites API router', () => {
     expect(body.segments[0].mode).toBe('地铁');
   });
 
+  it('resolves an unlisted city before requesting nationwide transit routes', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', districts: [{ name: '长沙市', citycode: '0731', adcode: '430100' }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', route: { transits: [{ distance: '5500', cost: { duration: '1560', transit_fee: '3' }, segments: [{ bus: { buslines: [{ name: '轨道交通2号线', type: '地铁线路', departure_stop: { name: '五一广场' }, arrival_stop: { name: '溁湾镇' }, cost: { duration: '720' }, distance: '4200' }] } }] }] } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetcher);
+    const response = await worker.fetch(new Request('https://example.test/api/transit/realtime?city=长沙&origin=112.982279,28.19409&destination=112.938814,28.183364'), { AMAP_WEB_SERVICE_KEY: 'test' });
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.segments[0]).toMatchObject({ mode: '地铁', fare: 3 });
+    expect(fetcher.mock.calls[0][0]).toContain('/v3/config/district?');
+    expect(fetcher.mock.calls[1][0]).toContain('city1=0731');
+    expect(fetcher.mock.calls[1][0]).toContain('city2=0731');
+  });
+
   it('orchestrates restaurant facts and AI ranking in one guide endpoint', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', count: '1', pois: [{ id: 'poi-1', name: '湖北菜馆', location: '114.3,30.5', business: { rating: '4.7', cost: '66' } }] }), { status: 200 }))
