@@ -80,7 +80,7 @@ export function PlannerPage() {
             <ChoiceGroup label="饮食限制" values={DIETARY_RESTRICTIONS} selected={request.dietaryRestrictions} onToggle={(item) => toggle<DietaryRestriction>('dietaryRestrictions', item)} />
             <ChoiceGroup label="特殊需求" values={SPECIAL_NEEDS} selected={request.specialNeeds} onToggle={(item) => toggle<SpecialNeed>('specialNeeds', item)} />
 
-            <button type="button" onClick={createPlan} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-6 py-4 font-black text-white shadow-soft transition hover:bg-river active:scale-[0.99]"><Sparkles className="h-5 w-5" />规则引擎生成演示</button>
+            <button type="button" onClick={createPlan} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-6 py-4 font-black text-white shadow-soft transition hover:bg-river active:scale-[0.99]"><Sparkles className="h-5 w-5" />AI 增强生成方案</button>
           </section>}
 
           {resultMode && plan && <section ref={resultRef} className="space-y-4 scroll-mt-28">

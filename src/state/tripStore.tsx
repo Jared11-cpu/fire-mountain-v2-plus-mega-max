@@ -7,11 +7,13 @@ import {
   buildFoodRecommendations,
   buildSocialCopy,
   calculateTimeline,
+  CITY_NAMES,
   comparePlans,
   daysBetween,
   defaultTripRequest,
   generateTripPlan,
   isIsoDate,
+  INTERESTS,
   normalizeRequest,
   parseTravelRequest,
   updatePlanDates,
@@ -22,6 +24,7 @@ import {
   type TripPlan,
   type TripRequest,
 } from '../domain/trip';
+import { enrichTripPlanWithBackend, parseTravelRequestWithAi, type AiTravelRequest } from '../services/travelApi';
 import type { JournalEntry } from '../types/route';
 
 const STORAGE_KEY = 'chuyou-app-state-v2';
@@ -47,6 +50,7 @@ type Action =
   | { type: 'request'; request: TripRequest }
   | { type: 'parsed'; request: TripRequest; tags: ParsedTag[]; warnings: string[] }
   | { type: 'plan'; plan: TripPlan | null }
+  | { type: 'enriched'; planId: string; analysis?: string; foods?: TripPlan['foodRecommendations'] }
   | { type: 'journal'; entries: JournalEntry[] }
   | { type: 'save'; status: SaveStatus }
   | { type: 'toast'; toast: ToastMessage }
@@ -59,6 +63,10 @@ function reducer(state: TripState, action: Action): TripState {
     case 'request': return { ...state, request: action.request };
     case 'parsed': return { ...state, request: action.request, parsedTags: action.tags, parseWarnings: action.warnings };
     case 'plan': return { ...state, plan: action.plan };
+    case 'enriched': {
+      if (!state.plan || state.plan.id !== action.planId) return state;
+      return { ...state, plan: { ...state.plan, updatedAt: new Date().toISOString(), content: action.analysis ? { ...state.plan.content, summary: action.analysis } : state.plan.content, foodRecommendations: action.foods ?? state.plan.foodRecommendations } };
+    }
     case 'journal': return { ...state, journalEntries: action.entries };
     case 'save': return { ...state, saveStatus: action.status };
     case 'toast': return { ...state, toast: action.toast };
@@ -105,7 +113,7 @@ type RequestPatch = Partial<TripRequest> & { startDate?: string; endDate?: strin
 type TripContextValue = TripState & {
   updateRequest: (patch: RequestPatch) => boolean;
   selectCity: (city: CityName) => void;
-  parseText: (text?: string) => void;
+  parseText: (text?: string) => Promise<void>;
   generate: () => TripPlan;
   replan: () => Promise<void>;
   setPlan: (plan: TripPlan | null) => void;
@@ -174,17 +182,32 @@ export function TripProvider({ children }: { children: ReactNode }) {
     notify(`已将统一目的地更新为${city}`, 'success');
   }, [notify, state.request.startDate]);
 
-  const parseText = useCallback((text = state.request.freeText) => {
-    const result = parseTravelRequest(text, state.request);
-    dispatch({ type: 'parsed', request: result.request, tags: result.tags, warnings: result.warnings });
-    notify(result.tags.length ? `已识别 ${result.tags.length} 项，请确认后生成。` : '未识别到新条件，请在表单中补充。', result.tags.length ? 'success' : 'info');
+  const parseText = useCallback(async (text = state.request.freeText) => {
+    const local = parseTravelRequest(text, state.request);
+    try {
+      const ai = await parseTravelRequestWithAi(text);
+      const result = mergeAiTravelRequest(local, ai, text);
+      dispatch({ type: 'parsed', request: result.request, tags: result.tags, warnings: result.warnings });
+      notify(`千问已识别 ${result.tags.length} 项，请确认后生成。`, 'success');
+    } catch {
+      dispatch({ type: 'parsed', request: local.request, tags: local.tags, warnings: [...local.warnings, 'AI 服务暂不可用，已使用本地规则识别。'] });
+      notify(local.tags.length ? `已按本地规则识别 ${local.tags.length} 项。` : '未识别到新条件，请在表单中补充。', local.tags.length ? 'info' : 'error');
+    }
   }, [notify, state.request]);
 
   const generate = useCallback(() => {
     const plan = generateTripPlan(state.request, state.plan);
     dispatch({ type: 'plan', plan });
-    dispatch({ type: 'summary', value: '已根据当前确认参数生成规则路线。' });
-    notify(`已生成${state.request.destinationCity}${state.request.days}天规则路线`, 'success');
+    dispatch({ type: 'summary', value: '已生成基础路线，正在加载千问分析与真实餐厅。' });
+    notify(`已生成${state.request.destinationCity}${state.request.days}天路线，正在进行 AI 增强`, 'success');
+    void enrichTripPlanWithBackend(plan, state.request).then((enrichment) => {
+      dispatch({ type: 'enriched', planId: plan.id, ...enrichment });
+      dispatch({ type: 'summary', value: '已加载千问方案分析与高德真实餐厅推荐。' });
+      notify('千问分析与真实餐厅推荐已更新', 'success');
+    }).catch(() => {
+      dispatch({ type: 'summary', value: 'AI 或高德服务暂不可用，当前保留规则路线与核验提示。' });
+      notify('在线增强暂不可用，已保留可用的规则方案', 'info');
+    });
     return plan;
   }, [notify, state.plan, state.request]);
 
@@ -309,4 +332,27 @@ export function useTrip() {
 }
 
 export { STORAGE_KEY };
+
+function mergeAiTravelRequest(local: ReturnType<typeof parseTravelRequest>, ai: AiTravelRequest, text: string) {
+  const request = { ...local.request, freeText: text };
+  const tags = [...local.tags];
+  const warnings = [...local.warnings];
+  if (ai.city && CITY_NAMES.includes(ai.city as CityName)) {
+    request.destinationCity = ai.city as CityName;
+    tags.push({ type: '城市', value: ai.city });
+  } else if (ai.city) warnings.push(`当前页面暂只支持湖北演示城市，未自动切换到“${ai.city}”。`);
+  if (ai.days) { request.days = Math.min(15, Math.max(1, Math.round(ai.days))); request.endDate = addDaysIso(request.startDate, request.days - 1); tags.push({ type: '天数', value: `${request.days}天` }); }
+  if (ai.budgetPerPerson !== null) { request.budget = Math.max(0, Math.round(ai.budgetPerPerson)); tags.push({ type: '预算', value: `${request.budget}元` }); }
+  const interests = ai.interests.filter((item): item is TripRequest['interests'][number] => INTERESTS.includes(item as TripRequest['interests'][number]));
+  if (interests.length) { request.interests = [...new Set([...request.interests, ...interests])]; interests.forEach((item) => tags.push({ type: '兴趣', value: item })); }
+  const dietaryRestrictions = new Set<TripRequest['dietaryRestrictions'][number]>(request.dietaryRestrictions);
+  if (ai.dietaryNeeds.some((item) => /不辣|少辣/.test(item))) dietaryRestrictions.add('不吃辣');
+  if (ai.dietaryNeeds.some((item) => /素食|吃素/.test(item))) dietaryRestrictions.add('素食');
+  request.dietaryRestrictions = [...dietaryRestrictions];
+  const specialNeeds = new Set<TripRequest['specialNeeds'][number]>(request.specialNeeds);
+  if (/少走|行动不便|无障碍/.test(ai.mobility || '')) specialNeeds.add('行动不便');
+  request.specialNeeds = [...specialNeeds];
+  const uniqueTags = tags.filter((tag, index) => tags.findIndex((candidate) => candidate.type === tag.type && candidate.value === tag.value) === index);
+  return { request: normalizeRequest(request), tags: uniqueTags, warnings: [...new Set(warnings)] };
+}
 
