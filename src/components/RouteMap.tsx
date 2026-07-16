@@ -3,14 +3,15 @@ import { AlertTriangle, Camera, Clock3, MapPin, Navigation, RefreshCw, Route as 
 import type { RoutePoint, SmartRoute } from '../types/route';
 import { getPointTypeLabel } from '../services/mapService';
 import { classifyDrivingFailure, convertGpsPoint, loadAmapJsApi, loadAmapPlugin, planAmapDrivingRoute, resetAmapJsApiLoader, type DrivingSearchFailure, type RoadPlanMetrics, type RoadPlanStatus } from '../services/amapDriving';
+import type { TransportPlanResponse, TransitLegMode } from '../services/transportService';
 
 declare global { interface Window { AMap?: any; _AMapSecurityConfig?: { securityJsCode: string } } }
 
 export type RouteMapJournalCard = { id: string; note: string; photoUrl?: string };
-type Props = { route: SmartRoute; selectedPointId?: string; activePointIndex: number; navigating: boolean; onSelectPoint: (point: RoutePoint) => void; onRoadPlanChange?: (metrics: RoadPlanMetrics) => void; mapOnly?: boolean; journalCards?: RouteMapJournalCard[] };
+type Props = { route: SmartRoute; transportPlan?: TransportPlanResponse | null; selectedPointId?: string; activePointIndex: number; navigating: boolean; onSelectPoint: (point: RoutePoint) => void; onRoadPlanChange?: (metrics: RoadPlanMetrics) => void; mapOnly?: boolean; journalCards?: RouteMapJournalCard[] };
 const icons: Record<RoutePoint['type'], typeof MapPin> = { start: Navigation, scenic: MapPin, food: Utensils, photo: Camera, rest: Clock3, hotel: MapPin, end: RouteIcon };
 
-export function RouteMap({ route, selectedPointId, onSelectPoint, onRoadPlanChange, mapOnly = false, journalCards = [] }: Props) {
+export function RouteMap({ route, transportPlan, selectedPointId, onSelectPoint, onRoadPlanChange, mapOnly = false, journalCards = [] }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>();
   const markerRef = useRef<any[]>([]);
@@ -27,6 +28,7 @@ export function RouteMap({ route, selectedPointId, onSelectPoint, onRoadPlanChan
   const securityCode = import.meta.env.VITE_AMAP_SECURITY_CODE;
   const routeSignature = useMemo(() => route.points.map(({ id, lng, lat, roadAccessLng, roadAccessLat, coordinateSystem }) => `${id}:${lng},${lat}:${roadAccessLng},${roadAccessLat}:${coordinateSystem}`).join('|'), [route.points]);
   const journalCardSignature = useMemo(() => journalCards.map(({ id, note, photoUrl }) => `${id}:${note}:${photoUrl ?? ''}`).join('|'), [journalCards]);
+  const transportSignature = useMemo(() => transportPlan?.source === 'transport-api' ? transportPlan.segments.flatMap((segment) => segment.legs).map((leg) => `${leg.id}:${leg.mode}:${leg.polyline.length}`).join('|') : '', [transportPlan]);
 
   useEffect(() => {
     let disposed = false;
@@ -85,6 +87,14 @@ export function RouteMap({ route, selectedPointId, onSelectPoint, onRoadPlanChan
         setMapAvailable(true);
 
         markerRef.current = amapPoints.map((point, index) => createRouteMarker(AMap, map, point, index, onSelectPoint, point.id === selectedPointId, journalCards.find((card) => card.id === point.id)));
+        const liveLegs = transportPlan?.source === 'transport-api' ? transportPlan.segments.flatMap((segment) => segment.legs).filter((leg) => leg.polyline.length > 1) : [];
+        if (liveLegs.length) {
+          overlayRef.current = addTransportPolylines(AMap, map, liveLegs);
+          window.requestAnimationFrame(() => map.resize?.());
+          map.setFitView([...overlayRef.current, ...markerRef.current], false, [90, 90, 90, 90]);
+          publish({ status: 'planned', source: 'amap-transit', distanceKm: transportPlan?.totalDistanceKm, durationMinutes: transportPlan?.totalMinutes, message: '已按本次动态查询结果绘制公交、地铁、步行与驾车分段路线。' });
+          return;
+        }
         const routeResult = await planAmapDrivingRoute(AMap, amapPoints);
         if (!isCurrent()) {
           routeResult.drivingInstances.forEach((driving) => driving?.clear?.());
@@ -119,7 +129,7 @@ export function RouteMap({ route, selectedPointId, onSelectPoint, onRoadPlanChan
       requestIdRef.current += 1;
       cleanupMap();
     };
-  }, [route.id, routeSignature, route.totalDistanceKm, amapEnabled, key, securityCode, retryVersion, onRoadPlanChange, journalCardSignature]);
+  }, [route.id, routeSignature, route.totalDistanceKm, amapEnabled, key, securityCode, retryVersion, onRoadPlanChange, journalCardSignature, transportSignature]);
 
   useEffect(() => {
     if (!selected || !mapAvailable || !mapRef.current) return;
@@ -135,10 +145,11 @@ export function RouteMap({ route, selectedPointId, onSelectPoint, onRoadPlanChan
   }, [selected?.id, mapAvailable, journalCardSignature]);
 
   const failed = status !== 'loading' && status !== 'planned';
+  const usingTransitGeometry = transportPlan?.source === 'transport-api' && transportPlan.segments.some((segment) => segment.legs.some((leg) => leg.polyline.length > 1));
 
   return <section className={`min-w-0 overflow-hidden bg-white ${mapOnly ? 'h-full' : 'rounded-[1.75rem] shadow-soft ring-1 ring-ink/5'}`}>
     {!mapOnly && <div className="flex flex-col gap-4 border-b border-ink/5 p-5 md:flex-row md:items-center md:justify-between"><div><div className="inline-flex items-center gap-2 text-xs font-black tracking-[.16em] text-river"><Navigation className="h-4 w-4"/>LIVE ROUTE</div><h3 className="mt-2 font-display text-2xl font-black">{route.title}</h3><p className="mt-1 text-sm text-ink/50">{message}</p></div><div className="flex gap-2 text-xs font-bold"><span className="rounded-full bg-mist px-3 py-2">{route.totalDistanceKm} km</span><span className="rounded-full bg-mist px-3 py-2">{route.recommendedStartTime} 出发</span></div></div>}
-      <div className={mapOnly ? 'h-full min-w-0' : 'grid min-w-0 lg:grid-cols-[1.35fr_.65fr]'}><div className={`relative min-w-0 overflow-hidden bg-[#d8f1ee] ${mapOnly ? 'h-full min-h-[620px]' : 'min-h-[430px]'}`}><div ref={container} className={`absolute inset-0 ${!mapAvailable ? 'invisible' : ''}`}/>{mapAvailable && <div className="pointer-events-none absolute bottom-3 left-3 z-20 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black text-river shadow-sm">高德交互地图</div>}{!mapAvailable && status !== 'loading' && <GaodeRasterRouteMap route={route} selectedPointId={selectedPointId} onSelectPoint={onSelectPoint} journalCards={journalCards} />}{status === 'loading' && <div className="absolute inset-0 grid place-items-center bg-[#d8f1ee]"><div className="rounded-2xl bg-white/90 px-5 py-4 text-sm font-black text-river shadow-soft">正在请求高德道路规划…</div></div>}{failed && <div role="alert" className="absolute left-4 right-4 top-20 z-30 rounded-2xl border border-red-200 bg-white/95 p-4 shadow-xl backdrop-blur"><div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500"/><div className="min-w-0 flex-1"><strong className="block text-sm text-red-700">道路规划失败，当前仅为点位连线</strong><p className="mt-1 text-xs font-bold leading-5 text-ink/55">{message}；仅为点位连线，不代表真实道路。</p></div><button type="button" onClick={() => { resetAmapJsApiLoader(); setRetryVersion((value) => value + 1); }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white"><RefreshCw className="h-3.5 w-3.5"/>重新规划</button></div></div>}</div>
+      <div className={mapOnly ? 'h-full min-w-0' : 'grid min-w-0 lg:grid-cols-[1.35fr_.65fr]'}><div className={`relative min-w-0 overflow-hidden bg-[#d8f1ee] ${mapOnly ? 'h-full min-h-[620px]' : 'min-h-[430px]'}`}><div ref={container} className={`absolute inset-0 ${!mapAvailable ? 'invisible' : ''}`}/>{mapAvailable && <div className="pointer-events-none absolute bottom-3 left-3 z-20 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black text-river shadow-sm">{usingTransitGeometry ? '动态公交/地铁路线' : '高德真实驾车路线'}</div>}{usingTransitGeometry && mapAvailable && <div className="pointer-events-none absolute bottom-12 left-3 z-20 flex flex-wrap gap-1.5 rounded-2xl bg-white/92 p-2 text-[9px] font-black shadow-sm"><MapLegend color="#c94f3d" label="地铁"/><MapLegend color="#0e6b72" label="公交"/><MapLegend color="#6b7280" label="步行" dashed/><MapLegend color="#d97706" label="驾车"/></div>}{!mapAvailable && status !== 'loading' && <GaodeRasterRouteMap route={route} selectedPointId={selectedPointId} onSelectPoint={onSelectPoint} journalCards={journalCards} />}{status === 'loading' && <div className="absolute inset-0 grid place-items-center bg-[#d8f1ee]"><div className="rounded-2xl bg-white/90 px-5 py-4 text-sm font-black text-river shadow-soft">正在请求高德道路规划…</div></div>}{failed && <div role="alert" className="absolute left-4 right-4 top-20 z-30 rounded-2xl border border-red-200 bg-white/95 p-4 shadow-xl backdrop-blur"><div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500"/><div className="min-w-0 flex-1"><strong className="block text-sm text-red-700">道路规划失败，当前仅为点位连线</strong><p className="mt-1 text-xs font-bold leading-5 text-ink/55">{message}；仅为点位连线，不代表真实道路。</p></div><button type="button" onClick={() => { resetAmapJsApiLoader(); setRetryVersion((value) => value + 1); }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white"><RefreshCw className="h-3.5 w-3.5"/>重新规划</button></div></div>}</div>
       {!mapOnly&&<aside className="bg-[#fbfaf5] p-5">{selected&&<><div className="text-xs font-black tracking-[.16em] text-tower">STOP {route.points.findIndex(p=>p.id===selected.id)+1}</div><h4 className="mt-2 font-display text-3xl font-black">{selected.name}</h4><div className="mt-2 flex gap-2 text-xs font-bold text-ink/50"><span>{getPointTypeLabel(selected.type)}</span><span>·</span><span>{selected.time}</span><span>·</span><span>{selected.stayMinutes} 分钟</span></div><p className="mt-5 leading-7 text-ink/68">{selected.reason}</p><div className="mt-4 rounded-xl border-l-4 border-tower bg-white p-4 text-sm leading-6"><b>拍照：</b>{selected.photoTip}</div><div className="mt-3 rounded-xl bg-river/5 p-4 text-sm leading-6"><b>手账：</b>{selected.recordTip}</div></>}</aside>}
     </div>
   </section>;
@@ -209,6 +220,20 @@ function addRoadPolyline(AMap: any, map: any, path: any[]) {
   map.add(overlays);
   return overlays;
 }
+
+function addTransportPolylines(AMap: any, map: any, legs: Array<{ mode: TransitLegMode; polyline: Array<[number, number]> }>) {
+  const colors: Record<TransitLegMode, string> = { walk: '#6b7280', bus: '#0e6b72', subway: '#c94f3d', railway: '#7c3aed', taxi: '#d97706', shuttle: '#12a885' };
+  const overlays: any[] = [];
+  for (const [index, leg] of legs.entries()) {
+    const outline = new AMap.Polyline({ path: leg.polyline, strokeColor: '#ffffff', strokeWeight: 11, strokeOpacity: 0.9, lineJoin: 'round', lineCap: 'round', zIndex: 45 + index * 2 });
+    const line = new AMap.Polyline({ path: leg.polyline, strokeColor: colors[leg.mode], strokeWeight: leg.mode === 'walk' ? 5 : 7, strokeOpacity: 0.96, strokeStyle: leg.mode === 'walk' ? 'dashed' : 'solid', strokeDasharray: leg.mode === 'walk' ? [8, 8] : undefined, showDir: leg.mode !== 'subway', lineJoin: 'round', lineCap: 'round', zIndex: 46 + index * 2 });
+    overlays.push(outline, line);
+  }
+  map.add(overlays);
+  return overlays;
+}
+
+function MapLegend({ color, label, dashed = false }: { color: string; label: string; dashed?: boolean }) { return <span className="inline-flex items-center gap-1 text-ink/55"><i className={`block h-0.5 w-4 ${dashed ? 'border-t-2 border-dashed' : ''}`} style={dashed ? { borderColor: color } : { backgroundColor: color }} />{label}</span>; }
 
 function addFallbackPolyline(AMap: any, map: any, points: RoutePoint[]) {
   const fallbackLine = new AMap.Polyline({

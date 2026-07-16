@@ -15,11 +15,12 @@ describe('transportService', () => {
     expect(result.isRealtime).toBe(false);
     expect(result.segments).toHaveLength(5);
     expect(result.segments.every((segment) => segment.arrivalTime > segment.departureTime)).toBe(true);
-    expect(result.notices[0]).toContain('未配置实时交通 API');
+    expect(result.notices[0]).toContain('未配置可用的动态公交代理');
+    expect(result.segments.every((segment) => segment.legs.length === 1)).toBe(true);
   });
 
   it('配置后端地址时使用交通 API 响应', async () => {
-    const apiResult: TransportPlanResponse = { source: 'transport-api', sourceLabel: '测试交通 API', generatedAt: new Date().toISOString(), isRealtime: true, totalMinutes: 20, totalDistanceKm: 8, summary: '实时路线可用', segments: [{ id: 'a-b', from: 'A', to: 'B', departureTime: '09:00', arrivalTime: '09:20', durationMinutes: 20, distanceKm: 8, mode: '网约车', costEstimate: '¥20–30', instruction: '按实时路线行驶', liveStatus: '道路畅通' }], notices: [] };
+    const apiResult: TransportPlanResponse = { source: 'transport-api', sourceLabel: '测试交通 API', generatedAt: new Date().toISOString(), isRealtime: true, freshness: 'vehicle-realtime', totalMinutes: 20, totalDistanceKm: 8, totalFare: 4, summary: '实时路线可用', segments: [{ id: 'a-b', from: 'A', to: 'B', departureTime: '09:00', arrivalTime: '09:20', durationMinutes: 20, distanceKm: 8, mode: '地铁', costEstimate: '¥4', fare: 4, instruction: '乘坐地铁2号线', liveStatus: '道路畅通', legs: [{ id: 'leg-1', mode: 'subway', lineName: '地铁2号线', viaStops: ['中山公园'], durationMinutes: 20, distanceKm: 8, fare: 4, polyline: [[114.1, 30.1], [114.2, 30.2]] }] }], notices: [] };
     const fetcher = vi.fn(async () => new Response(JSON.stringify(apiResult), { status: 200, headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch;
     const result = await resolveTransportPlan(requestFixture(), { endpoint: 'https://example.test/transport', fetcher });
     expect(fetcher).toHaveBeenCalledOnce();

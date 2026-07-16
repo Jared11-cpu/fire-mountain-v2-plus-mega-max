@@ -158,12 +158,12 @@ test('weather turns source data into practical itinerary advice', async ({ page 
 test('transport adapter renders a truthful segmented smart plan', async ({ page }) => {
   await page.goto('/#/planner');
   await page.getByRole('button', { name: '规则引擎生成演示' }).click();
-  await page.getByRole('button', { name: '交通' }).click();
-  await expect(page.getByRole('heading', { name: '智能交通方案' })).toBeVisible();
+  await page.getByRole('tab', { name: '交通' }).click();
+  await expect(page.getByRole('heading', { name: '公共交通路书' })).toBeVisible();
   await expect(page.getByText('规则引擎交通方案')).toBeVisible();
-  await expect(page.getByText('非实时估算')).toBeVisible();
+  await expect(page.getByText('规则估算', { exact: true })).toBeVisible();
   await expect(page.getByText('第 1 段', { exact: false })).toBeVisible();
-  await expect(page.getByText('已预留 TransportPlanProvider 接口', { exact: false })).toBeVisible();
+  await expect(page.getByText('动态公交代理', { exact: false })).toBeVisible();
 });
 
 test('budget accepts direct amounts, persists, and scrolls without resizing the map', async ({ page }) => {

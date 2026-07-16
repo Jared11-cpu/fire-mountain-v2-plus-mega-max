@@ -111,3 +111,33 @@ GitHub Pages workflow 可从 Actions Variables 或 Secrets 读取：
 1. 高德地图 JS API：在 `RouteMap.tsx` 中用真实地图容器替换 SVG 模拟地图，使用 Polyline 绘制真实路线。
 2. 高德 Web 服务 API：在 `mapService.ts` 中接入 POI 搜索、路径规划、地理编码和逆地理编码。
 3. 天气与真实 AI API：根据天气、开放时间、拥堵情况和用户偏好，动态生成拍照建议、避坑提醒、短视频脚本和朋友圈文案。
+
+## 公交与地铁动态路线
+
+项目已提供 `/api/transit/plan` Sites 服务端代理和混合交通展示：后端逐段调用高德路径规划 2.0，前端展示地铁/公交线路名、上下车站、途经站、运营时间、预计票价、步行接驳，并在地图上按交通方式分色绘制真实坐标线。
+
+- Sites 运行时配置 `AMAP_WEB_SERVICE_KEY`（高德“Web 服务 API”Key，不能使用前端 JS API Key）。
+- GitHub Pages 在 Actions Variable 中配置 `VITE_TRANSPORT_API_URL`，指向已部署 Sites 的 `/api/transit/plan`。
+- Sites 同域访问会自动使用 `/api/transit/plan`；本地和 GitHub Pages 未配置代理时安全降级为规则估算。
+- “动态路线查询”会根据当前日期、时间和换乘策略重新算路，但不代表公交车辆 GPS、地铁列车位置或精确到站倒计时；车辆级实时能力需接入运营方授权数据源。
+
+## 后端旅游智能接口
+
+Sites 服务端已保持现有前端页面和 `/api/transit/plan` 契约不变，并增加以下接口：
+
+- `POST /api/ai/parse-request`：千问提取用户自然语言旅行需求。
+- `POST /api/ai/recommend`：只在高德真实候选地点中排序，不允许 AI 改写事实。
+- `POST /api/ai/analyze`：基于用户给定上下文进行自定义旅行分析，缺失数据会单独列出。
+- `POST /api/ai/transport-advice`：只解释已有交通方案，不让 AI 编造线路、时间或票价。
+- `GET /api/poi/search`、`/api/restaurants/search`、`/api/shops/search`、`/api/hotels/search`、`/api/attractions/search`：高德真实地点检索。
+- `POST /api/restaurants/guide`、`/api/shops/guide`：一次请求完成高德真实候选检索与千问个性化排序。
+- `POST /api/route/plan`：驾车、步行、骑行或公交路线规划。
+- `GET /api/traffic/status`：指定矩形、圆形范围或道路的动态路况。
+- `GET /api/transit/realtime`：当前时刻的公交/地铁动态方案；响应会明确标注不包含车辆 GPS。
+- `GET /api/health`：检查 AI、地图和车辆级实时能力是否可用。
+
+Sites 运行时需要配置 `AMAP_WEB_SERVICE_KEY` 和 `DASHSCOPE_API_KEY`。可选配置 `AI_BASE_URL`、`AI_EXTRACT_MODEL`、`AI_RECOMMEND_MODEL`、`DASHSCOPE_WORKSPACE_ID` 与 `ALLOWED_ORIGINS`。这些服务端密钥不能使用 `VITE_` 前缀。
+
+餐厅/店铺推荐的可靠流程是：先调用高德搜索取得真实 POI，再把候选列表传入 `/api/ai/recommend` 排序。营业时间、人均消费和评分可能缺失或变化，接口会保留数据来源与查询时间，最终下单前仍需以商家公告为准。
+
+交通面板在页面打开期间每 90 秒静默刷新一次动态路线，不改变现有页面布局；手动刷新仍然保留。只有运营方授权数据源才能把状态升级为车辆级实时定位。

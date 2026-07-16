@@ -44,6 +44,7 @@ jobs:
           VITE_AMAP_ENABLED: ${{ vars.VITE_AMAP_ENABLED || 'true' }}
           VITE_AMAP_KEY: ${{ secrets.VITE_AMAP_KEY }}
           VITE_AMAP_SECURITY_CODE: ${{ secrets.VITE_AMAP_SECURITY_CODE }}
+          VITE_TRANSPORT_API_URL: ${{ vars.VITE_TRANSPORT_API_URL }}
         run: npm run build:static
 
       - name: Upload Pages artifact
