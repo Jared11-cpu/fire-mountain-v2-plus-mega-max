@@ -12,7 +12,7 @@ export type RoadPlanMetrics = {
   status: RoadPlanStatus;
   distanceKm?: number;
   durationMinutes?: number;
-  source: 'amap-driving' | 'estimate';
+  source: 'amap-driving' | 'amap-transit' | 'estimate';
   message: string;
 };
 
