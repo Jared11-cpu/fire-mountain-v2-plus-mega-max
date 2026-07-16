@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { classifyDrivingFailure, convertGpsPoint, extractDrivingPath, loadAmapJsApi, planAmapDrivingRoute, resetAmapJsApiLoader, splitDrivingPoints } from './amapDriving';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { classifyDrivingFailure, convertGpsPoint, extractDrivingPath, loadAmapJsApi, planAmapDrivingRoute, planBackendDrivingRoute, resetAmapJsApiLoader, splitDrivingPoints } from './amapDriving';
+
+afterEach(() => vi.restoreAllMocks());
 
 describe('AMap Driving helpers', () => {
   it('splits routes beyond the 16-waypoint limit while sharing segment endpoints', () => {
@@ -46,6 +48,22 @@ describe('AMap Driving helpers', () => {
     await planAmapDrivingRoute({ Driving, DrivingPolicy: {} }, points);
     expect(searchedStart).toEqual([114.1, 30.1]);
     expect(points[0].lng).toBe(114);
+  });
+
+  it('merges backend Web Service routes and sends the coordinate system', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ paths: [{ distanceKm: 1.2, durationMinutes: 3, polyline: [[114, 30], [114.1, 30.1]] }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ paths: [{ distanceKm: 2.3, durationMinutes: 5, polyline: [[114.1, 30.1], [114.2, 30.2]] }] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetcher);
+    const result = await planBackendDrivingRoute([
+      { id: 'a', lng: 114, lat: 30, coordinateSystem: 'wgs84' },
+      { id: 'b', lng: 114.1, lat: 30.1 },
+      { id: 'c', lng: 114.2, lat: 30.2 },
+    ] as any);
+    expect(result.path).toEqual([[114, 30], [114.1, 30.1], [114.2, 30.2]]);
+    expect(result.distanceMeters).toBe(3500);
+    expect(result.durationSeconds).toBe(480);
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({ origin: { lng: 114, lat: 30, coordinateSystem: 'wgs84' } });
   });
 
   it('does not insert the AMap script when the security code is missing', async () => {

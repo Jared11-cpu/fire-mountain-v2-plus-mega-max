@@ -66,6 +66,21 @@ describe('Sites API router', () => {
     expect(fetcher.mock.calls[1][0]).toContain('city2=0731');
   });
 
+  it('converts WGS-84 coordinates before server-side driving planning', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', locations: '114.006000,30.006000' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', route: { paths: [{ distance: '1200', cost: { duration: '300' }, steps: [{ polyline: '114.006,30.006;114.2,30.2' }] }] } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetcher);
+    const response = await worker.fetch(new Request('https://example.test/api/route/plan', {
+      method: 'POST',
+      body: JSON.stringify({ mode: 'driving', origin: { lng: 114, lat: 30, coordinateSystem: 'wgs84' }, destination: { lng: 114.2, lat: 30.2 } }),
+    }), { AMAP_WEB_SERVICE_KEY: 'test' });
+    expect(response.status).toBe(200);
+    expect((await response.json()).paths[0]).toMatchObject({ distanceKm: 1.2, durationMinutes: 5 });
+    expect(fetcher.mock.calls[0][0]).toContain('/v3/assistant/coordinate/convert?');
+    expect(fetcher.mock.calls[1][0]).toContain('origin=114.006000%2C30.006000');
+  });
+
   it('orchestrates restaurant facts and AI ranking in one guide endpoint', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', count: '1', pois: [{ id: 'poi-1', name: '湖北菜馆', location: '114.3,30.5', business: { rating: '4.7', cost: '66' } }] }), { status: 200 }))
