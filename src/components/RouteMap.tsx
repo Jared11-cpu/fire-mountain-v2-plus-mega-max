@@ -346,7 +346,7 @@ function GaodeRasterRouteMap({ route, roadPath, selectedPointId, onSelectPoint, 
       </div>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-white/55 to-transparent" />
       <div className="absolute bottom-3 left-3 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black text-ink/60 shadow-sm">高德瓦片底图 · AutoNavi</div>
-      <div className={`absolute bottom-3 right-3 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black shadow-sm ${hasRealRoad ? 'text-river' : 'text-red-600'}`}>{hasRealRoad ? '高德后端实时道路规划' : '仅为点位连线，不代表真实道路'}</div>
+      <div className={`absolute bottom-3 right-3 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black shadow-sm ${hasRealRoad ? 'text-river' : 'text-red-600'}`}>{hasRealRoad ? '高德后端动态道路规划' : '仅为点位连线，不代表真实道路'}</div>
     </div>
   );
 }
@@ -427,3 +427,4 @@ function lngLatToWorld(lng: number, lat: number, zoom: number) {
     y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * size,
   };
 }
+
