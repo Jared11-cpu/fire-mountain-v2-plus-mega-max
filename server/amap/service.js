@@ -3,6 +3,7 @@ import { assertText, fetchJson, httpError } from '../http.js';
 const AMAP_ROOT = 'https://restapi.amap.com';
 export const CITY_CODES = { 武汉: '027', 宜昌: '0717', 恩施: '0718', 荆州: '0716', 襄阳: '0710', 黄石: '0714' };
 export const TRANSIT_STRATEGIES = { recommended: 0, economy: 1, 'fewest-transfers': 2, 'least-walking': 3, 'subway-first': 7, fastest: 8 };
+const resolvedCityCodes = new Map(Object.entries(CITY_CODES));
 
 export function amapConfigured(env) { return Boolean(env.AMAP_WEB_SERVICE_KEY); }
 
@@ -33,7 +34,7 @@ export async function planRoute(env, input) {
   const mode = ['driving', 'walking', 'bicycling', 'transit'].includes(input.mode) ? input.mode : 'driving';
   if (mode === 'transit') {
     const request = {
-      city: input.city, departureDate: input.departureDate || todayInChina(), departureTime: input.departureTime || currentTimeInChina(), strategy: input.strategy || 'recommended',
+      city: input.city, cityCode: await resolveTransitCityCode(key, input.city), departureDate: input.departureDate || todayInChina(), departureTime: input.departureTime || currentTimeInChina(), strategy: input.strategy || 'recommended',
     };
     return { mode, generatedAt: new Date().toISOString(), ...(await transitSegment(key, request, { ...input.origin, id: 'origin', name: input.origin.name || '起点', arrivalTime: request.departureTime, durationMinutes: 0 }, { ...input.destination, id: 'destination', name: input.destination.name || '终点' }, 0)) };
   }
@@ -73,8 +74,9 @@ export async function trafficStatus(env, query) {
 export async function transitPlan(env, input) {
   const key = requireKey(env);
   validateTransitRequest(input);
+  const request = { ...input, cityCode: await resolveTransitCityCode(key, input.city) };
   const segments = [];
-  for (let index = 0; index < input.points.length - 1; index += 1) segments.push(await transitSegment(key, input, input.points[index], input.points[index + 1], index));
+  for (let index = 0; index < input.points.length - 1; index += 1) segments.push(await transitSegment(key, request, input.points[index], input.points[index + 1], index));
   const totalMinutes = segments.reduce((sum, segment) => sum + segment.durationMinutes, 0);
   const totalDistanceKm = round1(segments.reduce((sum, segment) => sum + segment.distanceKm, 0));
   const fares = segments.map((segment) => segment.fare).filter((value) => value !== undefined);
@@ -100,7 +102,8 @@ export async function realtimeTransitQuery(env, query) {
 }
 
 async function transitSegment(key, request, from, to, index) {
-  const params = new URLSearchParams({ key, origin: requiredCoordinate(from, 'from'), destination: requiredCoordinate(to, 'to'), city1: CITY_CODES[request.city] ?? request.city, city2: CITY_CODES[request.city] ?? request.city, strategy: String(TRANSIT_STRATEGIES[request.strategy] ?? 0), AlternativeRoute: '1', show_fields: 'cost,polyline', date: request.departureDate, time: request.departureTime.replace(':', '-') });
+  const cityCode = request.cityCode || CITY_CODES[request.city] || request.city;
+  const params = new URLSearchParams({ key, origin: requiredCoordinate(from, 'from'), destination: requiredCoordinate(to, 'to'), city1: cityCode, city2: cityCode, strategy: String(TRANSIT_STRATEGIES[request.strategy] ?? 0), AlternativeRoute: '1', show_fields: 'cost,polyline', date: request.departureDate, time: request.departureTime.replace(':', '-') });
   const data = await amapJson(`/v5/direction/transit/integrated?${params}`, '高德公交服务');
   const transit = data.route?.transits?.[0];
   if (!transit) return drivingFallback(key, from, to, index);
@@ -143,6 +146,20 @@ async function amapJson(path, service) {
   const data = await fetchJson(`${AMAP_ROOT}${path}`, {}, { service });
   if (String(data.status) !== '1') throw httpError(502, `${service}查询失败`, { upstreamCode: data.infocode, upstreamMessage: data.info });
   return data;
+}
+async function resolveTransitCityCode(key, city) {
+  const name = assertText(city, '城市', { max: 50 });
+  if (/^\d{3,12}$/.test(name)) return name;
+  const cached = resolvedCityCodes.get(name);
+  if (cached) return cached;
+  const params = new URLSearchParams({ key, keywords: name, subdistrict: '0', extensions: 'base' });
+  const data = await amapJson(`/v3/config/district?${params}`, '高德城市代码');
+  const district = (data.districts || []).find((item) => String(item.name || '').replace(/[市地区自治州盟]$/u, '') === name.replace(/[市地区自治州盟]$/u, '')) || data.districts?.[0];
+  const cityCode = Array.isArray(district?.citycode) ? district.citycode[0] : district?.citycode;
+  const resolved = String(cityCode || district?.adcode || '').trim();
+  if (!/^\d{3,12}$/.test(resolved)) throw httpError(502, `无法解析“${name}”的公交城市代码`);
+  resolvedCityCodes.set(name, resolved);
+  return resolved;
 }
 function requireKey(env) { if (!env.AMAP_WEB_SERVICE_KEY) throw httpError(503, '尚未配置高德 Web 服务 Key'); return env.AMAP_WEB_SERVICE_KEY; }
 function validateTransitRequest(input) { if (!input || !Array.isArray(input.points) || input.points.length < 2 || input.points.length > 12) throw httpError(400, 'points 必须包含 2-12 个站点'); if (!input.city || !/^\d{4}-\d{2}-\d{2}$/.test(input.departureDate || '') || !/^\d{2}:\d{2}$/.test(input.departureTime || '')) throw httpError(400, 'city、departureDate 和 departureTime 必填且格式不正确'); input.points.forEach((point) => { requiredCoordinate(point, 'point'); assertText(point.name, '站点名称', { max: 120 }); }); }
