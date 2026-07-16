@@ -29,8 +29,6 @@ export async function searchPois(env, query, category = 'poi') {
 
 export async function planRoute(env, input) {
   const key = requireKey(env);
-  const origin = requiredCoordinate(input.origin, 'origin');
-  const destination = requiredCoordinate(input.destination, 'destination');
   const mode = ['driving', 'walking', 'bicycling', 'transit'].includes(input.mode) ? input.mode : 'driving';
   if (mode === 'transit') {
     const request = {
@@ -38,6 +36,8 @@ export async function planRoute(env, input) {
     };
     return { mode, generatedAt: new Date().toISOString(), ...(await transitSegment(key, request, { ...input.origin, id: 'origin', name: input.origin.name || '起点', arrivalTime: request.departureTime, durationMinutes: 0 }, { ...input.destination, id: 'destination', name: input.destination.name || '终点' }, 0)) };
   }
+  const origin = await routeCoordinate(key, input.origin, 'origin');
+  const destination = await routeCoordinate(key, input.destination, 'destination');
   const params = new URLSearchParams({ key, origin, destination, show_fields: 'cost,polyline' });
   if (mode === 'driving') params.set('strategy', String(input.strategy ?? 0));
   const data = await amapJson(`/v5/direction/${mode}?${params}`, `高德${mode}路线规划`);
@@ -168,6 +168,7 @@ function normalizePath(path) { const durationMinutes = secondsToMinutes(path.cos
 function categoryTypes(category) { if (category === 'restaurant') return '050000'; if (category === 'shop') return '060000'; if (category === 'hotel') return '100000'; if (category === 'attraction') return '110000'; return ''; }
 function defaultKeyword(category) { return category === 'restaurant' ? '餐厅' : category === 'shop' ? '商店' : category === 'hotel' ? '酒店' : category === 'attraction' ? '景点' : '旅游'; }
 function coordinateObject(value) { const [lng, lat] = requireCoordinateString(value, '坐标').split(',').map(Number); return { lng, lat }; }
+async function routeCoordinate(key, point, name) { const value = requiredCoordinate(point, name); if (point?.coordinateSystem !== 'wgs84') return value; const params = new URLSearchParams({ key, locations: value, coordsys: 'gps' }); const data = await amapJson(`/v3/assistant/coordinate/convert?${params}`, '高德坐标转换'); return requireCoordinateString(data.locations, name); }
 function requiredCoordinate(point, name) { if (!point || !Number.isFinite(Number(point.lng)) || !Number.isFinite(Number(point.lat))) throw httpError(400, `${name} 需要有效 lng 和 lat`); return `${Number(point.lng).toFixed(6)},${Number(point.lat).toFixed(6)}`; }
 function requireCoordinateString(value, name) { const text = String(value || ''); const [lng, lat] = text.split(',').map(Number); if (!Number.isFinite(lng) || !Number.isFinite(lat)) throw httpError(400, `${name} 坐标格式应为 经度,纬度`); return `${lng.toFixed(6)},${lat.toFixed(6)}`; }
 function validCoordinate(value) { try { return value ? requireCoordinateString(value, 'location') : ''; } catch { throw httpError(400, 'location 坐标格式应为 经度,纬度'); } }

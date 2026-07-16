@@ -29,6 +29,53 @@ export type DrivingPlanResult = {
   drivingInstances: any[];
 };
 
+export async function planBackendDrivingRoute(points: RoutePoint[]): Promise<DrivingPlanResult> {
+  if (points.length < 2) throw { status: 'no_data', result: 'Route needs at least two points' } satisfies DrivingSearchFailure;
+  const mergedPath: [number, number][] = [];
+  let distanceMeters = 0;
+  let durationSeconds = 0;
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const response = await fetch(backendApiUrl('/api/route/plan'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'driving',
+        origin: backendRoutePoint(points[index]),
+        destination: backendRoutePoint(points[index + 1]),
+        strategy: 0,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw { status: String(response.status), result: payload, error: payload?.error || `道路接口请求失败 (${response.status})` } satisfies DrivingSearchFailure;
+    }
+    const path = payload?.paths?.[0];
+    if (!Array.isArray(path?.polyline) || path.polyline.length < 2) {
+      throw { status: 'no_data', result: payload, error: 'Route API contains no usable path' } satisfies DrivingSearchFailure;
+    }
+    appendUniquePath(mergedPath, path.polyline.map(([lng, lat]: [number, number]) => [Number(lng), Number(lat)]));
+    distanceMeters += Number(path.distanceKm || 0) * 1000;
+    durationSeconds += Number(path.durationMinutes || 0) * 60;
+  }
+
+  return { path: mergedPath, distanceMeters, durationSeconds, drivingInstances: [] };
+}
+
+function backendRoutePoint(point: RoutePoint) {
+  const hasRoadAccess = Number.isFinite(point.roadAccessLng) && Number.isFinite(point.roadAccessLat);
+  return {
+    lng: hasRoadAccess ? point.roadAccessLng : point.lng,
+    lat: hasRoadAccess ? point.roadAccessLat : point.lat,
+    coordinateSystem: hasRoadAccess ? 'gcj02' : point.coordinateSystem,
+  };
+}
+
+function backendApiUrl(path: string) {
+  const base = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '');
+  return `${base}${path}`;
+}
+
 export function loadAmapJsApi(key: string, securityCode?: string) {
   if (!securityCode || /请填写|placeholder/i.test(securityCode)) return Promise.reject({ status: 'auth-error', error: '缺少高德安全密钥，未发起道路规划' } satisfies DrivingSearchFailure);
   if (!key || /请填写|placeholder/i.test(key)) return Promise.reject({ status: 'auth-error', error: '缺少高德 Web 端 JS API Key，未发起道路规划' } satisfies DrivingSearchFailure);
