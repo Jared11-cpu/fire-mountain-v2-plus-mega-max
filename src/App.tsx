@@ -16,7 +16,7 @@ const routeFor: Record<PageId, string> = { home: '/', planner: '/planner', journ
 function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { selectCity, updateRequest } = useTrip();
+  const { selectCity, updateRequest, generateFromText, setPlan } = useTrip();
   const page: PageId = location.pathname.startsWith('/planner') || location.pathname.startsWith('/plan/')
     ? 'planner'
     : location.pathname.startsWith('/journal') ? 'journal' : location.pathname.startsWith('/about') ? 'pitch' : 'home';
@@ -30,7 +30,7 @@ function App() {
     <div className="min-h-screen text-ink">
       <Header page={page} nav={navItems} onNavigate={go} />
       <Routes>
-        <Route path="/" element={<LandingPage onStart={(prompt) => { if (prompt) updateRequest({ freeText: prompt }); go('planner'); }} onCitySelect={(city) => { selectCity(city); go('planner'); }} onFootprintDetail={() => go('journal')} />} />
+        <Route path="/" element={<LandingPage onStart={(prompt) => { if (prompt) { updateRequest({ freeText: prompt }); setPlan(null); go('planner'); void generateFromText(prompt); return; } go('planner'); }} onCitySelect={(city) => { selectCity(city); go('planner'); }} onFootprintDetail={() => go('journal')} />} />
         <Route path="/planner" element={<PlannerPage />} />
         <Route path="/journal" element={<JournalPage />} />
         <Route path="/journal/:entryId" element={<JournalPage />} />

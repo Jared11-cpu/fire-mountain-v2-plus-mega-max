@@ -54,6 +54,18 @@ describe('parseTravelRequest', () => {
   it('未明确输入带儿童时不自动改为家庭', () => {
     expect(parseTravelRequest('武汉亲子美食三日游').request.travelerType).toBe('朋友');
   });
+
+  it('把首页明确地点保存为必经约束，并容忍三峡口语描述', () => {
+    const bridge = parseTravelRequest('我想去武汉两天，必须经过武汉长江大桥，喜欢历史和江景');
+    expect(bridge.request.requestedPlaces).toContain('武汉长江大桥');
+    expect(bridge.tags).toContainEqual({ type: '必经地点', value: '武汉长江大桥' });
+    expect(parseTravelRequest('我想去宜昌看三峡奇景').request.requestedPlaces).toContain('三峡');
+  });
+
+  it('只输入具体地点时也能推断目的城市', () => {
+    expect(parseTravelRequest('我想去看三峡奇景，两天，喜欢山水').request.destinationCity).toBe('宜昌');
+    expect(parseTravelRequest('必须经过武汉长江大桥').request.destinationCity).toBe('武汉');
+  });
 });
 
 describe('dates, timeline and plan integrity', () => {

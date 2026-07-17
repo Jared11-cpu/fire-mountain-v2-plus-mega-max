@@ -8,20 +8,25 @@ import { useTrip } from '../state/tripStore';
 import { MapWorkspace } from './MapWorkspace';
 
 export function PlannerPage() {
-  const { request, plan, parsedTags, parseWarnings, isReplanning, updateRequest, parseText, generate, replan, resetPlan, notify } = useTrip();
+  const { request, plan, parsedTags, parseWarnings, isReplanning, updateRequest, parseText, generateFromText, replan, resetPlan, notify } = useTrip();
   const [resultMode, setResultMode] = useState(Boolean(plan));
   const [selectedPointId, setSelectedPointId] = useState<string | undefined>(plan?.route.points[0]?.id);
   const [locating, setLocating] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const resultRef = useRef<HTMLDivElement>(null);
   const selectedCity = useMemo(() => cities.find((city) => city.name === request.destinationCity) ?? cities[0], [request.destinationCity]);
 
-  useEffect(() => { if (plan) setResultMode(true); }, [plan]);
+  useEffect(() => { if (plan) { setResultMode(true); setSelectedPointId((current) => plan.route.points.some((point) => point.id === current) ? current : plan.route.points[0]?.id); } }, [plan]);
 
-  const createPlan = () => {
-    const next = generate();
-    setSelectedPointId(next.route.points[0]?.id);
-    setResultMode(true);
-    window.setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+  const createPlan = async () => {
+    if (generating) return;
+    setGenerating(true);
+    try {
+      const next = await generateFromText(request.freeText);
+      setSelectedPointId(next.route.points[0]?.id);
+      setResultMode(true);
+      window.setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+    } finally { setGenerating(false); }
   };
 
   const locate = async () => {
@@ -80,7 +85,7 @@ export function PlannerPage() {
             <ChoiceGroup label="饮食限制" values={DIETARY_RESTRICTIONS} selected={request.dietaryRestrictions} onToggle={(item) => toggle<DietaryRestriction>('dietaryRestrictions', item)} />
             <ChoiceGroup label="特殊需求" values={SPECIAL_NEEDS} selected={request.specialNeeds} onToggle={(item) => toggle<SpecialNeed>('specialNeeds', item)} />
 
-            <button type="button" onClick={createPlan} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-6 py-4 font-black text-white shadow-soft transition hover:bg-river active:scale-[0.99]"><Sparkles className="h-5 w-5" />AI 增强生成方案</button>
+            <button type="button" disabled={generating} onClick={createPlan} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-6 py-4 font-black text-white shadow-soft transition hover:bg-river active:scale-[0.99] disabled:cursor-wait disabled:opacity-70">{generating ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}{generating ? 'AI 正在识别必经地点…' : 'AI 个性化生成方案'}</button>
           </section>}
 
           {resultMode && plan && <section ref={resultRef} className="space-y-4 scroll-mt-28">

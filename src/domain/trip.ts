@@ -32,6 +32,8 @@ export type TripRequest = {
   travelerType: TravelerType;
   dietaryRestrictions: DietaryRestriction[];
   specialNeeds: SpecialNeed[];
+  requestedPlaces: string[];
+  avoidPlaces: string[];
   freeText: string;
   startDate: string;
   endDate: string;
@@ -58,7 +60,7 @@ export type FoodRecommendation = {
 
 export type TripPlan = {
   id: string;
-  generationSource: 'rules-v1';
+  generationSource: 'rules-v1' | 'qwen-amap';
   createdAt: string;
   updatedAt: string;
   requestSnapshot: TripRequest;
@@ -72,7 +74,7 @@ export type TripPlan = {
   lastRequestHash: string;
 };
 
-export type ParsedTag = { type: '城市' | '天数' | '预算' | '兴趣' | '人群' | '饮食限制' | '特殊需求' | '出发地'; value: string };
+export type ParsedTag = { type: '城市' | '天数' | '预算' | '兴趣' | '人群' | '饮食限制' | '特殊需求' | '必经地点' | '避开地点' | '出发地'; value: string };
 export type ParseResult = { request: TripRequest; tags: ParsedTag[]; warnings: string[] };
 export type PlanDifference = { changed: boolean; message: string; pointDelta: number; budgetDelta: number; durationDelta: number };
 
@@ -127,6 +129,8 @@ export function defaultTripRequest(city: CityName = '宜昌'): TripRequest {
     travelerType: '朋友',
     dietaryRestrictions: [],
     specialNeeds: [],
+    requestedPlaces: [],
+    avoidPlaces: [],
     freeText: `我想去${city}两天一夜，预算600元，喜欢拍照和美食。`,
     startDate,
     endDate: addDaysIso(startDate, 1),
@@ -143,16 +147,18 @@ export function normalizeRequest(input: TripRequest): TripRequest {
     interests: unique(input.interests).filter((item): item is Interest => INTERESTS.includes(item as Interest)),
     dietaryRestrictions: unique(input.dietaryRestrictions),
     specialNeeds: unique(input.specialNeeds),
+    requestedPlaces: unique(input.requestedPlaces ?? []).slice(0, 10),
+    avoidPlaces: unique(input.avoidPlaces ?? []).slice(0, 10),
     startDate,
     endDate: addDaysIso(startDate, days - 1),
   };
 }
 
 export function parseTravelRequest(text: string, base = defaultTripRequest()): ParseResult {
-  const next: TripRequest = { ...base, interests: [], travelerType: '朋友', dietaryRestrictions: [], specialNeeds: [], freeText: text, startDate: base.startDate, endDate: base.endDate };
+  const next: TripRequest = { ...base, interests: [], travelerType: '朋友', dietaryRestrictions: [], specialNeeds: [], requestedPlaces: [], avoidPlaces: [], freeText: text, startDate: base.startDate, endDate: base.endDate };
   const tags: ParsedTag[] = [];
   const warnings: string[] = [];
-  const city = CITY_NAMES.find((name) => text.includes(name));
+  let city = CITY_NAMES.find((name) => text.includes(name));
   if (city) { next.destinationCity = city; next.origin = { ...origins[city] }; tags.push({ type: '城市', value: city }); }
   const dayMatch = text.match(/([一二两三四五六七八九十\d]+)天(?:[一二两三四五六七八九十\d]+夜)?/) ?? text.match(/([一二两三四五六七八九十\d]+)日游/);
   if (dayMatch) { next.days = Math.min(15, Math.max(1, chineseNumber(dayMatch[1]))); tags.push({ type: '天数', value: `${next.days}天` }); }
@@ -173,6 +179,12 @@ export function parseTravelRequest(text: string, base = defaultTripRequest()): P
   if (/雨天|下雨/.test(text)) { next.specialNeeds = unique([...next.specialNeeds, '雨天方案']); tags.push({ type: '特殊需求', value: '雨天方案' }); }
   if (/不吃辣|不要辣|忌辣/.test(text)) { next.dietaryRestrictions = unique([...next.dietaryRestrictions, '不吃辣']); tags.push({ type: '饮食限制', value: '不吃辣' }); }
   if (/素食|吃素/.test(text)) { next.dietaryRestrictions = unique([...next.dietaryRestrictions, '素食']); tags.push({ type: '饮食限制', value: '素食' }); }
+  next.requestedPlaces = extractRequestedPlaces(text);
+  next.requestedPlaces.forEach((value) => tags.push({ type: '必经地点', value }));
+  if (!city) {
+    city = inferCityFromPlaces(next.requestedPlaces);
+    if (city) { next.destinationCity = city; next.origin = { ...origins[city] }; tags.push({ type: '城市', value: city }); }
+  }
   const originMatch = text.match(/从([^，,。]{2,16})出发/);
   if (originMatch) { next.origin = { ...next.origin, name: originMatch[1].trim(), source: 'manual' }; tags.push({ type: '出发地', value: next.origin.name }); }
   if (!city) warnings.push('未识别目的地城市，已保留当前城市。');
@@ -306,6 +318,30 @@ function cleanDuplicateTitle(title: string, interests: Interest[]) { const [firs
 export function buildSocialCopy(request: TripRequest) {
   const interests = request.interests.length ? request.interests.join('、') : '轻松游';
   return `${request.destinationCity}${request.days}天旅行计划已生成：总预算${request.budget}元，重点安排${interests}。路线会按当前条件同步更新，出发前请再次核验开放时间与交通状态。`;
+}
+
+function inferCityFromPlaces(places: string[]): CityName | undefined {
+  const cityKeywords: Array<[CityName, RegExp]> = [
+    ['武汉', /武汉|黄鹤楼|东湖|江汉路|昙华林|古德寺|户部巷|湖北省博物馆/],
+    ['宜昌', /宜昌|三峡|清江画廊|屈原故里/], ['恩施', /恩施|云龙地缝|女儿城|屏山峡谷|梭布垭/],
+    ['荆州', /荆州|宾阳楼/], ['襄阳', /襄阳|古隆中|唐城/], ['黄石', /黄石|磁湖|矿山公园/],
+  ];
+  return cityKeywords.find(([, pattern]) => places.some((place) => pattern.test(place)))?.[0];
+}
+
+export function extractRequestedPlaces(text: string) {
+  const knownPlaces = [
+    '武汉长江大桥', '湖北省博物馆', '武汉大学', '黄鹤楼', '东湖', '江汉路', '昙华林', '古德寺', '户部巷',
+    '三峡人家', '三峡大坝', '长江三峡', '清江画廊', '屈原故里', '三峡',
+    '恩施大峡谷', '云龙地缝', '女儿城', '屏山峡谷', '梭布垭石林',
+    '荆州博物馆', '荆州古城', '古隆中', '襄阳古城', '唐城影视基地', '黄石国家矿山公园', '磁湖',
+  ];
+  const matches = knownPlaces.filter((name) => text.includes(name));
+  for (const match of text.matchAll(/(?:想去看?|想看|要去|必去|必须经过|经过|包括|参观)([\u4e00-\u9fa5A-Za-z0-9·]{2,18}?)(?=以及|还有|并且|而且|，|。|、|$)/g)) {
+    const value = match[1].trim();
+    if (!/[天日元]|预算|旅游|旅行|景点|地方|玩/.test(value)) matches.push(value);
+  }
+  return unique(matches).filter((name, index, rows) => !rows.slice(0, index).some((existing) => existing.includes(name) || name.includes(existing))).slice(0, 10);
 }
 
 export function buildFoodRecommendations(request: TripRequest) { return filterFoods(request); }

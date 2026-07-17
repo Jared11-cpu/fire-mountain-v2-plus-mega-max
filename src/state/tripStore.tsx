@@ -25,7 +25,7 @@ import {
   type TripRequest,
 } from '../domain/trip';
 import { enrichTripPlanWithBackend, parseTravelRequestWithAi, type AiTravelRequest } from '../services/travelApi';
-import type { JournalEntry } from '../types/route';
+import type { JournalEntry, RoutePoint } from '../types/route';
 
 const STORAGE_KEY = 'chuyou-app-state-v2';
 const LEGACY_JOURNAL_KEY = 'chuyou-journal-entries';
@@ -50,7 +50,7 @@ type Action =
   | { type: 'request'; request: TripRequest }
   | { type: 'parsed'; request: TripRequest; tags: ParsedTag[]; warnings: string[] }
   | { type: 'plan'; plan: TripPlan | null }
-  | { type: 'enriched'; planId: string; analysis?: string; foods?: TripPlan['foodRecommendations'] }
+  | { type: 'enriched'; planId: string; analysis?: string; foods?: TripPlan['foodRecommendations']; routePoints?: RoutePoint[] }
   | { type: 'journal'; entries: JournalEntry[] }
   | { type: 'save'; status: SaveStatus }
   | { type: 'toast'; toast: ToastMessage }
@@ -65,7 +65,8 @@ function reducer(state: TripState, action: Action): TripState {
     case 'plan': return { ...state, plan: action.plan };
     case 'enriched': {
       if (!state.plan || state.plan.id !== action.planId) return state;
-      return { ...state, plan: { ...state.plan, updatedAt: new Date().toISOString(), content: action.analysis ? { ...state.plan.content, summary: action.analysis } : state.plan.content, foodRecommendations: action.foods ?? state.plan.foodRecommendations } };
+      const plan = action.routePoints?.length ? applyPersonalizedRoute(state.plan, action.routePoints) : state.plan;
+      return { ...state, plan: { ...plan, updatedAt: new Date().toISOString(), content: action.analysis ? { ...plan.content, summary: action.analysis } : plan.content, foodRecommendations: action.foods ?? plan.foodRecommendations } };
     }
     case 'journal': return { ...state, journalEntries: action.entries };
     case 'save': return { ...state, saveStatus: action.status };
@@ -113,8 +114,9 @@ type RequestPatch = Partial<TripRequest> & { startDate?: string; endDate?: strin
 type TripContextValue = TripState & {
   updateRequest: (patch: RequestPatch) => boolean;
   selectCity: (city: CityName) => void;
-  parseText: (text?: string) => Promise<void>;
+  parseText: (text?: string) => Promise<TripRequest>;
   generate: () => TripPlan;
+  generateFromText: (text: string) => Promise<TripPlan>;
   replan: () => Promise<void>;
   setPlan: (plan: TripPlan | null) => void;
   patchPlan: (updater: (plan: TripPlan) => TripPlan) => void;
@@ -189,27 +191,40 @@ export function TripProvider({ children }: { children: ReactNode }) {
       const result = mergeAiTravelRequest(local, ai, text);
       dispatch({ type: 'parsed', request: result.request, tags: result.tags, warnings: result.warnings });
       notify(`千问已识别 ${result.tags.length} 项，请确认后生成。`, 'success');
+      return result.request;
     } catch {
       dispatch({ type: 'parsed', request: local.request, tags: local.tags, warnings: [...local.warnings, 'AI 服务暂不可用，已使用本地规则识别。'] });
       notify(local.tags.length ? `已按本地规则识别 ${local.tags.length} 项。` : '未识别到新条件，请在表单中补充。', local.tags.length ? 'info' : 'error');
+      return local.request;
     }
   }, [notify, state.request]);
 
-  const generate = useCallback(() => {
-    const plan = generateTripPlan(state.request, state.plan);
-    dispatch({ type: 'plan', plan });
-    dispatch({ type: 'summary', value: '已生成基础路线，正在加载千问分析与真实餐厅。' });
-    notify(`已生成${state.request.destinationCity}${state.request.days}天路线，正在进行 AI 增强`, 'success');
-    void enrichTripPlanWithBackend(plan, state.request).then((enrichment) => {
+  const enrichPlan = useCallback((plan: TripPlan, request: TripRequest) => {
+    void enrichTripPlanWithBackend(plan, request).then((enrichment) => {
       dispatch({ type: 'enriched', planId: plan.id, ...enrichment });
-      dispatch({ type: 'summary', value: '已加载千问方案分析与高德真实餐厅推荐。' });
-      notify('千问分析与真实餐厅推荐已更新', 'success');
+      dispatch({ type: 'summary', value: enrichment.routePoints?.length ? '已按首页需求加载千问分析、高德真实个性化地点与餐厅推荐。' : '已加载千问方案分析与高德真实餐厅推荐。' });
+      notify(enrichment.routePoints?.length ? '个性化地点与必经点已加入路线' : '千问分析与真实餐厅推荐已更新', 'success');
     }).catch(() => {
       dispatch({ type: 'summary', value: 'AI 或高德服务暂不可用，当前保留规则路线与核验提示。' });
       notify('在线增强暂不可用，已保留可用的规则方案', 'info');
     });
+  }, [notify]);
+
+  const generateForRequest = useCallback((request: TripRequest) => {
+    const plan = generateTripPlan(request, state.plan);
+    dispatch({ type: 'plan', plan });
+    dispatch({ type: 'summary', value: '已生成基础路线，正在让千问按需求选择高德真实地点。' });
+    notify(`已生成${request.destinationCity}${request.days}天基础路线，正在匹配个性化地点`, 'success');
+    enrichPlan(plan, request);
     return plan;
-  }, [notify, state.plan, state.request]);
+  }, [enrichPlan, state.plan]);
+
+  const generate = useCallback(() => generateForRequest(state.request), [generateForRequest, state.request]);
+
+  const generateFromText = useCallback(async (text: string) => {
+    const request = await parseText(text);
+    return generateForRequest(request);
+  }, [generateForRequest, parseText]);
 
   const replan = useCallback(async () => {
     if (state.isReplanning || !state.plan) return;
@@ -219,10 +234,11 @@ export function TripProvider({ children }: { children: ReactNode }) {
     const next = generateTripPlan(state.request, state.plan);
     const difference = comparePlans(state.plan, next);
     dispatch({ type: 'plan', plan: next });
-    dispatch({ type: 'summary', value: difference.message });
+    dispatch({ type: 'summary', value: `${difference.message} 正在重新匹配个性化地点。` });
     dispatch({ type: 'replanning', value: false });
+    enrichPlan(next, state.request);
     notify(difference.message, difference.changed ? 'success' : 'info');
-  }, [notify, state.isReplanning, state.plan, state.request]);
+  }, [enrichPlan, notify, state.isReplanning, state.plan, state.request]);
 
   const setPlan = useCallback((plan: TripPlan | null) => dispatch({ type: 'plan', plan }), []);
   const patchPlan = useCallback((updater: (plan: TripPlan) => TripPlan) => {
@@ -282,7 +298,7 @@ export function TripProvider({ children }: { children: ReactNode }) {
     notify('方案已重置，真实手账和照片已保留。', 'success');
   }, [notify]);
 
-  const value = useMemo<TripContextValue>(() => ({ ...state, updateRequest, selectCity, parseText, generate, replan, setPlan, patchPlan, updatePlanSettings, updateBudgetItems, setBudgetTotal, setJournalEntries, resetPlan, notify }), [generate, notify, parseText, patchPlan, replan, resetPlan, selectCity, setBudgetTotal, setJournalEntries, setPlan, state, updateBudgetItems, updatePlanSettings, updateRequest]);
+  const value = useMemo<TripContextValue>(() => ({ ...state, updateRequest, selectCity, parseText, generate, generateFromText, replan, setPlan, patchPlan, updatePlanSettings, updateBudgetItems, setBudgetTotal, setJournalEntries, resetPlan, notify }), [generate, generateFromText, notify, parseText, patchPlan, replan, resetPlan, selectCity, setBudgetTotal, setJournalEntries, setPlan, state, updateBudgetItems, updatePlanSettings, updateRequest]);
 
   return <TripContext.Provider value={value}>{children}<GlobalStatus state={state} /></TripContext.Provider>;
 }
@@ -309,6 +325,25 @@ function syncPlanBudget(plan: TripPlan, items: BudgetItem[], request: TripReques
       title: replaceBudget(plan.route.title),
       sceneryAnalysis: { ...plan.route.sceneryAnalysis, socialCopy: buildSocialCopy(request) },
     },
+  };
+}
+
+function applyPersonalizedRoute(plan: TripPlan, recommended: RoutePoint[]): TripPlan {
+  const start = plan.route.startPoint;
+  const uniqueRecommended = recommended.filter((point, index, rows) => point.id !== start.id && rows.findIndex((candidate) => candidate.id === point.id) === index);
+  const source = [start, ...uniqueRecommended].map((point, index) => ({ ...point, day: index === 0 ? 1 : Math.min(plan.requestSnapshot.days, Math.ceil(index / Math.max(1, Math.ceil(uniqueRecommended.length / plan.requestSnapshot.days)))) }));
+  const points = calculateTimeline(source, plan.settings.departureTime);
+  const required = plan.requestSnapshot.requestedPlaces;
+  return {
+    ...plan,
+    generationSource: 'qwen-amap',
+    route: {
+      ...plan.route,
+      points,
+      title: required.length ? `${plan.requestSnapshot.destinationCity}个性化路线｜必经 ${required.join('、')}` : `${plan.requestSnapshot.destinationCity} AI 个性化路线`,
+      transportSuggestion: `${plan.route.transportSuggestion} 地点由高德实时检索，千问按本次首页需求排序。`,
+    },
+    settings: { ...plan.settings, targetPointCount: points.length, targetDurationMinutes: points.reduce((sum, point) => sum + point.durationMinutes + point.travelMinutesToNext, 0) },
   };
 }
 
@@ -352,6 +387,10 @@ function mergeAiTravelRequest(local: ReturnType<typeof parseTravelRequest>, ai: 
   const specialNeeds = new Set<TripRequest['specialNeeds'][number]>(request.specialNeeds);
   if (/少走|行动不便|无障碍/.test(ai.mobility || '')) specialNeeds.add('行动不便');
   request.specialNeeds = [...specialNeeds];
+  request.requestedPlaces = [...new Set([...request.requestedPlaces, ...(ai.requestedPlaces ?? [])])].slice(0, 10);
+  request.avoidPlaces = [...new Set([...request.avoidPlaces, ...(ai.avoidPlaces ?? [])])].slice(0, 10);
+  request.requestedPlaces.forEach((item) => tags.push({ type: '必经地点', value: item }));
+  request.avoidPlaces.forEach((item) => tags.push({ type: '避开地点', value: item }));
   const uniqueTags = tags.filter((tag, index) => tags.findIndex((candidate) => candidate.type === tag.type && candidate.value === tag.value) === index);
   return { request: normalizeRequest(request), tags: uniqueTags, warnings: [...new Set(warnings)] };
 }
