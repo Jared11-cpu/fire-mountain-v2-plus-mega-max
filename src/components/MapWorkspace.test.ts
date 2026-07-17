@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { baseRoutes } from '../data/routeData';
-import { compactTravelTip, getDianpingShopDetailUrl, getHourlyChartScale, getPointServiceLinks } from './MapWorkspace';
+import { compactTravelTip, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointServiceLinks } from './MapWorkspace';
 
 describe('getPointServiceLinks', () => {
   it('assigns every planned stop its own traceable representative cover', () => {
@@ -108,5 +108,19 @@ describe('getDianpingShopDetailUrl', () => {
     expect(getDianpingShopDetailUrl('https://www.dianping.com/search/keyword/16/0_test')).toBeUndefined();
     expect(getDianpingShopDetailUrl('https://www.dianping.com/')).toBeUndefined();
     expect(getDianpingShopDetailUrl('https://example.com/shop/123')).toBeUndefined();
+  });
+});
+
+describe('getBudgetUsageVisual', () => {
+  it('calculates usage from actual spending divided by the planned budget', () => {
+    expect(getBudgetUsageVisual(150, 600)).toMatchObject({ percent: 25, clampedPercent: 25, difference: 450 });
+    expect(getBudgetUsageVisual(600, 600)).toMatchObject({ percent: 100, clampedPercent: 100, difference: 0 });
+    expect(getBudgetUsageVisual(720, 600)).toMatchObject({ percent: 120, clampedPercent: 100, difference: -120 });
+  });
+
+  it('moves the usage color from green through yellow to red as spending rises', () => {
+    expect(getBudgetUsageVisual(0, 600).color).toBe('hsl(145 78% 55%)');
+    expect(getBudgetUsageVisual(300, 600).color).toBe('hsl(73 78% 55%)');
+    expect(getBudgetUsageVisual(600, 600).color).toBe('hsl(0 78% 55%)');
   });
 });
