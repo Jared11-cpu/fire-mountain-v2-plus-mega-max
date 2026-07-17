@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { baseRoutes } from '../data/routeData';
-import { compactTravelTip, getDianpingSearchUrl, getHourlyChartScale, getPointServiceLinks } from './MapWorkspace';
+import { compactTravelTip, getDianpingShopDetailUrl, getHourlyChartScale, getPointServiceLinks } from './MapWorkspace';
 
 describe('getPointServiceLinks', () => {
   it('assigns every planned stop its own traceable representative cover', () => {
@@ -98,19 +98,15 @@ describe('getHourlyChartScale', () => {
   });
 });
 
-describe('getDianpingSearchUrl', () => {
-  it('uses the Dianping city id and a dish plus area keyword', () => {
-    const url = getDianpingSearchUrl('宜昌', '凉虾与萝卜饺子', '解放路 / 西坝');
-
-    expect(url).toContain('/search/keyword/179/');
-    expect(url).toContain(encodeURIComponent('凉虾与萝卜饺子 解放路'));
+describe('getDianpingShopDetailUrl', () => {
+  it('accepts only direct Dianping shop detail pages', () => {
+    expect(getDianpingShopDetailUrl('https://www.dianping.com/shop/l3LoOn1gi2ggY01E')).toBe('https://www.dianping.com/shop/l3LoOn1gi2ggY01E');
+    expect(getDianpingShopDetailUrl('https://m.dianping.com/shop/128523373')).toBe('https://m.dianping.com/shop/128523373');
   });
 
-  it('maps every supported destination to its own city search', () => {
-    expect(getDianpingSearchUrl('武汉', '热干面', '粮道街')).toContain('/keyword/16/');
-    expect(getDianpingSearchUrl('恩施', '合渣', '女儿城')).toContain('/keyword/1368/');
-    expect(getDianpingSearchUrl('荆州', '早堂面', '沙市')).toContain('/keyword/184/');
-    expect(getDianpingSearchUrl('襄阳', '牛肉面', '樊城')).toContain('/keyword/180/');
-    expect(getDianpingSearchUrl('黄石', '港饼', '黄石港区')).toContain('/keyword/177/');
+  it('rejects search, homepage, and unrelated links', () => {
+    expect(getDianpingShopDetailUrl('https://www.dianping.com/search/keyword/16/0_test')).toBeUndefined();
+    expect(getDianpingShopDetailUrl('https://www.dianping.com/')).toBeUndefined();
+    expect(getDianpingShopDetailUrl('https://example.com/shop/123')).toBeUndefined();
   });
 });

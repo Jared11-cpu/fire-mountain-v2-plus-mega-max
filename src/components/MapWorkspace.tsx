@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import { AlertTriangle, ArrowLeft, Bus, CalendarDays, Camera, CarFront, Check, ChevronDown, CircleDollarSign, Clock3, CloudRain, CloudSun, Droplets, ExternalLink, Footprints, ImagePlus, Loader2, MapPin, Navigation, NotebookPen, PencilLine, Plus, ReceiptText, RefreshCw, Route as RouteIcon, Sparkles, Sun, Sunrise, Sunset, TrainFront, Trash2, Umbrella, Utensils, WalletCards, Wifi, WifiOff, Wind } from 'lucide-react';
 import type { TravelPlan } from '../utils/aiGenerator';
 import type { JournalEntry, RoutePoint, SmartRoute } from '../types/route';
-import { budgetTotal, calculateTimeline, parseLocalDate, type BudgetItem, type PlannedRoutePoint, type TripRequest } from '../domain/trip';
+import { budgetTotal, calculateTimeline, parseLocalDate, type BudgetItem, type FoodRecommendation, type PlannedRoutePoint, type TripRequest } from '../domain/trip';
 import { useTrip } from '../state/tripStore';
 import { resolveTransportPlan, toTransportPlanRequest, type TransportLeg, type TransitStrategy, type TransportMode, type TransportPlanResponse } from '../services/transportService';
 import { compressPhoto, deletePhoto, savePhoto } from '../services/journalStorage';
@@ -456,11 +456,15 @@ function TransitLegRow({ leg, last }: { leg: TransportLeg; last: boolean }) { co
 function legIcon(mode: TransportLeg['mode']) { if (mode === 'walk') return <Footprints className="h-3.5 w-3.5" />; if (mode === 'subway' || mode === 'railway') return <TrainFront className="h-3.5 w-3.5" />; if (mode === 'taxi') return <CarFront className="h-3.5 w-3.5" />; return <Bus className="h-3.5 w-3.5" />; }
 function transportIcon(mode: TransportMode) { if (mode === '步行') return <Footprints className="h-4 w-4" />; if (mode === '地铁') return <TrainFront className="h-4 w-4" />; if (mode === '公交' || mode === '公共交通') return <Bus className="h-4 w-4" />; if (mode === '景区专线') return <RouteIcon className="h-4 w-4" />; return <CarFront className="h-4 w-4" />; }
 
-const dianpingCityIds: Record<TripRequest['destinationCity'], string> = { 宜昌: '179', 武汉: '16', 恩施: '1368', 荆州: '184', 襄阳: '180', 黄石: '177' };
-
-export function getDianpingSearchUrl(city: TripRequest['destinationCity'], name: string, area: string) {
-  const primaryArea = area.split('/')[0]?.trim() ?? area.trim();
-  return `https://www.dianping.com/search/keyword/${dianpingCityIds[city]}/0_${encodeURIComponent(`${name} ${primaryArea}`.trim())}`;
+export function getDianpingShopDetailUrl(value?: string) {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    const isDianping = url.hostname === 'www.dianping.com' || url.hostname === 'm.dianping.com';
+    return isDianping && /^\/shop\/[A-Za-z0-9]+\/?$/.test(url.pathname) ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function Food({ plan }: { plan: NonNullable<ReturnType<typeof useTrip>['plan']> }) {
@@ -470,7 +474,12 @@ function Food({ plan }: { plan: NonNullable<ReturnType<typeof useTrip>['plan']> 
   return <div className="space-y-4"><h4 className="font-display text-2xl font-black">路线餐饮点</h4>
     <section aria-label="路线餐饮 KPI" className="grid grid-cols-3 gap-2 rounded-[1.5rem] bg-gradient-to-br from-ink to-river p-3 text-white shadow-[0_14px_32px_rgba(18,34,42,.16)]"><FoodKpi label="餐饮点" value={`${foodStops.length} 处`} /><FoodKpi label="首个到达" value={firstStop?.arrivalTime ?? firstStop?.time ?? '待安排'} /><FoodKpi label="计划停留" value={`${totalStay} 分钟`} /></section>
     {firstStop && <p className="rounded-2xl border border-river/10 bg-river/[0.055] px-3 py-2.5 text-[11px] font-bold text-ink/55"><span className="font-black text-river">当前路线用餐锚点：</span>{firstStop.name} · 第 {firstStop.day ?? 1} 天 · {firstStop.arrivalTime ?? firstStop.time}</p>}
-    {plan.foodRecommendations.length ? plan.foodRecommendations.map((food) => <article key={food.id} className="rounded-3xl bg-white p-4 shadow-sm"><h5 className="font-black">{food.name}</h5><p className="mt-2 text-sm font-bold text-ink/60">{food.area} · {food.priceRange}</p><div className="mt-2 flex flex-wrap gap-1">{food.tags.map((tag) => <span key={tag} className="rounded-full bg-jade/10 px-2 py-1 text-xs font-black text-jade">{tag}</span>)}</div><p className="mt-3 text-xs font-bold text-tower">营业状态：{food.businessStatus}</p><div className="mt-3 flex flex-wrap items-center justify-between gap-2"><a href={food.source.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] font-black text-river">来源：{food.source.name} · 核验 {food.source.checkedAt}<ExternalLink className="h-3 w-3" /></a><a href={food.dianpingUrl ?? getDianpingSearchUrl(plan.requestSnapshot.destinationCity, food.name, food.area)} target="_blank" rel="noreferrer" aria-label={`打开${food.name}大众点评商户详情`} className="inline-flex items-center gap-1.5 rounded-full bg-[#fff1eb] px-3 py-2 text-xs font-black text-[#d95028] transition hover:bg-[#ffdfd2]">大众点评 · 商户详情<ExternalLink className="h-3.5 w-3.5" /></a></div></article>) : <p className="rounded-2xl bg-white p-4 text-sm font-bold text-ink/55">当前限制条件下没有合适条目，请放宽筛选或自行核验。</p>}</div>;
+    {plan.foodRecommendations.length ? plan.foodRecommendations.map((food) => <FoodRecommendationCard key={food.id} food={food} />) : <p className="rounded-2xl bg-white p-4 text-sm font-bold text-ink/55">当前限制条件下没有合适条目，请放宽筛选或自行核验。</p>}</div>;
+}
+
+function FoodRecommendationCard({ food }: { food: FoodRecommendation }) {
+  const detailUrl = getDianpingShopDetailUrl(food.dianpingUrl);
+  return <article className="rounded-3xl bg-white p-4 shadow-sm"><h5 className="font-black">{food.name}</h5><p className="mt-2 text-sm font-bold text-ink/60">{food.area} · {food.priceRange}</p><div className="mt-2 flex flex-wrap gap-1">{food.tags.map((tag) => <span key={tag} className="rounded-full bg-jade/10 px-2 py-1 text-xs font-black text-jade">{tag}</span>)}</div><p className="mt-3 text-xs font-bold text-tower">营业状态：{food.businessStatus}</p>{detailUrl && <div className="mt-3 flex justify-end"><a href={detailUrl} target="_blank" rel="noreferrer" aria-label={`打开${food.name}大众点评商户详情`} className="inline-flex items-center gap-1.5 rounded-full bg-[#fff1eb] px-3 py-2 text-xs font-black text-[#d95028] transition hover:bg-[#ffdfd2]">大众点评 · 商户详情<ExternalLink className="h-3.5 w-3.5" /></a></div>}</article>;
 }
 
 function FoodKpi({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl border border-white/10 bg-white/10 p-2.5 backdrop-blur"><span className="block text-[9px] font-bold text-white/45">{label}</span><strong className="mt-1 block text-xs">{value}</strong></div>; }

@@ -166,7 +166,7 @@ async function recommendRestaurants(request: TripRequest): Promise<FoodRecommend
       priceRange: Number.isFinite(Number(item.averageCost)) ? `约 ¥${Number(item.averageCost)}/人` : '消费以商家最新信息为准',
       businessStatus: '非实时，出发前核验' as const,
       tags,
-      dianpingUrl: `https://www.dianping.com/search/keyword/0/0_${encodeURIComponent(`${request.destinationCity} ${item.name}`)}`,
+      dianpingUrl: '',
       source: { name: '高德动态查询 + 千问排序', url: sourceUrl, checkedAt },
     };
   });
