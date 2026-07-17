@@ -31,5 +31,6 @@ describe('travel backend integration', () => {
     expect(result.routePoints?.[0].reason).toContain('首页明确提出的必经地点');
     expect(result.foods?.[0]).toMatchObject({ id: 'poi-1', name: '真实湖北菜馆', priceRange: '约 ¥68/人' });
     expect(fetcher.mock.calls.map((call) => String(call[0]))).toEqual(expect.arrayContaining([expect.stringContaining('/api/attractions/search'), '/api/ai/recommend', '/api/restaurants/guide', '/api/ai/analyze']));
+    expect(fetcher.mock.calls.map((call) => String(call[0]))).toContain('/api/attractions/search?city=%E6%AD%A6%E6%B1%89&keywords=%E6%AD%A6%E6%B1%89%E9%95%BF%E6%B1%9F%E5%A4%A7%E6%A1%A5&pageSize=10&allTypes=1');
   });
 });
