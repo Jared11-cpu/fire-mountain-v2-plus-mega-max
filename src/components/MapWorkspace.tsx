@@ -6,6 +6,7 @@ import { budgetTotal, calculateTimeline, parseLocalDate, type BudgetItem, type P
 import { useTrip } from '../state/tripStore';
 import { resolveTransportPlan, toTransportPlanRequest, type TransportLeg, type TransitStrategy, type TransportMode, type TransportPlanResponse } from '../services/transportService';
 import { compressPhoto, deletePhoto, savePhoto } from '../services/journalStorage';
+import { fetchPointCover, getCuratedPointCover, type PointCover } from '../services/pointImageService';
 import { RouteMap } from './RouteMap';
 
 type Tab = 'overview' | 'stops' | 'days' | 'weather' | 'transport' | 'food' | 'budget';
@@ -75,7 +76,7 @@ export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, n
     <div className="border-b border-ink/10 bg-ink p-2 lg:hidden" role="tablist" aria-label="移动端工作区">
       <div className="grid grid-cols-2 rounded-full bg-white/10 p-1">{(['map', 'details'] as const).map((pane) => <button key={pane} type="button" role="tab" aria-selected={mobilePane === pane} onClick={() => setMobilePane(pane)} className={`rounded-full px-4 py-2 text-sm font-black ${mobilePane === pane ? 'bg-white text-ink' : 'text-white'}`}>{pane === 'map' ? '地图' : '详情'}</button>)}</div>
     </div>
-    <div className="grid lg:h-[760px] lg:grid-cols-[72px_minmax(0,1fr)_420px]">
+    <div className="grid lg:h-[calc(100vh-210px)] lg:min-h-[700px] lg:grid-cols-[72px_minmax(0,1fr)_420px]">
       <nav className={`${mobilePane === 'details' ? 'flex' : 'hidden'} workspace-tab-shell overflow-x-auto p-2 text-white lg:flex lg:items-center lg:overflow-visible`} aria-label="方案详情标签" role="tablist">
         <div className="workspace-tab-track">
           <span aria-hidden="true" className="workspace-tab-indicator" style={{ '--tab-index': activeTabIndex } as CSSProperties} />
@@ -124,10 +125,20 @@ function Overview({ plan, route, summary, onSettings, onBudget, onDistance, onAr
 
 function Stops({ points, selectedId, fallbackImageUrl, dailyRecords, maxDays, onSelect, onPatchPoint, notes, onPatchNote }: { points: PlannedRoutePoint[]; selectedId?: string; fallbackImageUrl: string; dailyRecords: Array<{ day: number; date: string }>; maxDays: number; onSelect: (point: RoutePoint) => void; onPatchPoint: (id: string, changes: Partial<PlannedRoutePoint>) => void; notes: Record<string, string>; onPatchNote: (id: string, note: string) => void }) {
   const [expandedId, setExpandedId] = useState<string | null>(selectedId ?? points[0]?.id ?? null);
+  const [fetchedCovers, setFetchedCovers] = useState<Record<string, PointCover>>({});
+  const coverQueryKey = points.map((point) => `${point.id}:${point.name}:${point.city}:${point.imageUrl ?? ''}`).join('|');
   useEffect(() => { if (selectedId) setExpandedId(selectedId); }, [selectedId]);
-  return <div className="space-y-4"><h4 className="font-display text-2xl font-black">地点安排</h4>{points.map((point, index) => { const expanded = expandedId === point.id; const date = dailyRecords.find((record) => record.day === (point.day ?? 1))?.date; const serviceLinks = getPointServiceLinks(point); return <article key={point.id} className={`overflow-hidden rounded-[1.65rem] border bg-white transition ${selectedId === point.id ? 'border-river shadow-[0_12px_35px_rgba(14,116,128,.14)]' : 'border-ink/10 shadow-sm'}`}>
+  useEffect(() => {
+    const controller = new AbortController();
+    const unresolved = points.filter((point) => !getCuratedPointCover(point.name) && !point.imageUrl);
+    if (unresolved.length) Promise.all(unresolved.map(async (point) => [point.id, await fetchPointCover(point.city, point.name, controller.signal)] as const))
+      .then((results) => setFetchedCovers((current) => ({ ...current, ...Object.fromEntries(results.filter((item): item is readonly [string, PointCover] => Boolean(item[1]))) })))
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [coverQueryKey]);
+  return <div className="space-y-4"><h4 className="font-display text-2xl font-black">地点安排</h4>{points.map((point, index) => { const expanded = expandedId === point.id; const date = dailyRecords.find((record) => record.day === (point.day ?? 1))?.date; const serviceLinks = getPointServiceLinks(point); const resolvedCover = getCuratedPointCover(point.name) ?? fetchedCovers[point.id]; const coverUrl = resolvedCover?.imageUrl ?? point.imageUrl ?? fallbackImageUrl; const coverCredit = resolvedCover?.imageCredit ?? point.imageCredit; return <article key={point.id} className={`overflow-hidden rounded-[1.65rem] border bg-white transition ${selectedId === point.id ? 'border-river shadow-[0_12px_35px_rgba(14,116,128,.14)]' : 'border-ink/10 shadow-sm'}`}>
       <button type="button" aria-expanded={expanded} onClick={() => { setExpandedId(expanded ? null : point.id); onSelect(point); }} className="group relative block h-36 w-full overflow-hidden text-left">
-        <img src={point.imageUrl ?? fallbackImageUrl} alt={`${point.name}地点照片`} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.035]" />
+        <img src={coverUrl} alt={`${point.name}风景封面`} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.035]" />
         <span className="absolute inset-0 bg-gradient-to-t from-ink/95 via-ink/20 to-transparent" />
         <span className="absolute left-4 top-4 rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-black text-ink backdrop-blur">{String(index + 1).padStart(2, '0')} · {point.type === 'start' ? '出发点' : '路线点'}</span>
         <span className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3 text-white"><span><strong className="block font-display text-xl font-black">{point.name}</strong><span className="mt-1 flex items-center gap-2 text-[11px] font-bold text-white/70"><CalendarDays className="h-3.5 w-3.5" />{formatCompactDate(date)}<Clock3 className="ml-1 h-3.5 w-3.5" />{point.arrivalTime}</span></span><ChevronDown className={`h-5 w-5 shrink-0 transition ${expanded ? 'rotate-180' : ''}`} /></span>
@@ -138,7 +149,7 @@ function Stops({ points, selectedId, fallbackImageUrl, dailyRecords, maxDays, on
         <div className="grid grid-cols-2 gap-2 text-xs font-bold"><InfoTile icon={Clock3} label="停留时间" value={`${point.durationMinutes} 分钟`} /><InfoTile icon={Navigation} label="下一段交通" value={point.travelMinutesToNext ? `${point.travelMinutesToNext} 分钟` : '行程终点'} /></div>
         <div className="grid gap-2 rounded-2xl bg-[#f1f6f2] p-3 text-xs leading-5 text-ink/65"><p className="flex gap-2"><Camera className="mt-0.5 h-4 w-4 shrink-0 text-river" /><span><strong className="text-ink">拍摄：</strong>{compactTravelTip(point.photoTip, `拍下${point.name}的代表性画面。`)}</span></p><p className="flex gap-2"><NotebookPen className="mt-0.5 h-4 w-4 shrink-0 text-tower" /><span><strong className="text-ink">记录：</strong>{compactTravelTip(point.recordTip, '记下最喜欢的细节。')}</span></p></div>
         <section className="rounded-2xl border border-ink/10 p-3"><div className="mb-3 flex items-center justify-between"><strong className="text-sm">我的地点安排</strong><span className="rounded-full bg-jade/10 px-2 py-1 text-[10px] font-black text-jade">自动保存</span></div><div className="grid grid-cols-2 gap-2"><label className="text-[11px] font-black text-ink/50">安排日期<select value={point.day ?? 1} onChange={(event) => onPatchPoint(point.id, { day: Number(event.target.value) })} className="focus-ring mt-1 w-full rounded-xl border border-ink/10 bg-white px-2 py-2 text-sm font-bold text-ink">{Array.from({ length: maxDays }, (_, day) => <option key={day + 1} value={day + 1}>第{day + 1}天</option>)}</select></label><label className="text-[11px] font-black text-ink/50">停留分钟<input type="number" min={10} max={480} step={5} value={point.durationMinutes} onChange={(event) => onPatchPoint(point.id, { durationMinutes: Math.max(10, Number(event.target.value) || 10) })} className="focus-ring mt-1 w-full rounded-xl border border-ink/10 px-2 py-2 text-sm font-bold text-ink" /></label></div><label className="mt-3 block text-[11px] font-black text-ink/50">我的安排<textarea value={notes[point.id] ?? ''} placeholder="例如：提前预约、重点拍摄坝体全景、为老人预留休息时间" onChange={(event) => onPatchNote(point.id, event.target.value)} rows={3} className="focus-ring mt-1 w-full resize-none rounded-xl border border-ink/10 px-3 py-2 text-sm font-medium text-ink" /></label></section>
-        <div className="flex items-center justify-between gap-3">{point.imageCredit ? <a href={point.imageCredit.sourceUrl} target="_blank" rel="noreferrer" className="text-[10px] font-bold text-ink/40 underline decoration-ink/20 underline-offset-2">{point.imageCredit.author} · {point.imageCredit.license}</a> : <span className="text-[10px] font-bold text-ink/40">城市授权代表图</span>}<a href={serviceLinks.detailUrl} target="_blank" rel="noreferrer" aria-label={`${point.name}地点详细信息`} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white transition hover:bg-river">地点详细信息<ExternalLink className="h-3.5 w-3.5" /></a></div>
+        <div className="flex items-center justify-between gap-3">{coverCredit ? <a href={coverCredit.sourceUrl} target="_blank" rel="noreferrer" className="text-[10px] font-bold text-ink/40 underline decoration-ink/20 underline-offset-2">{coverCredit.author} · {coverCredit.license}</a> : <span className="text-[10px] font-bold text-ink/40">地点实景图</span>}<a href={serviceLinks.detailUrl} target="_blank" rel="noreferrer" aria-label={`${point.name}地点详细信息`} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white transition hover:bg-river">地点详细信息<ExternalLink className="h-3.5 w-3.5" /></a></div>
       </div>}
     </article>; })}</div>;
 }

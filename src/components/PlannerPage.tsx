@@ -43,11 +43,11 @@ export function PlannerPage() {
   };
 
   return (
-    <main className="section-pad py-10">
-      <div className="mx-auto max-w-7xl">
-        <div className="mb-8">
+    <main className={resultMode && plan ? 'px-2 py-4 md:px-4 md:py-5' : 'section-pad py-10'}>
+      <div className={resultMode && plan ? 'mx-auto w-full max-w-none' : 'mx-auto max-w-7xl'}>
+        {!resultMode && <div className="mb-8">
           <h1 className="font-display text-4xl font-black text-ink md:text-5xl">懂你，也懂湖北</h1>
-        </div>
+        </div>}
 
         <div className={resultMode && plan ? 'space-y-5' : 'mx-auto max-w-5xl'}>
           {(!resultMode || !plan) && <section className="glass rounded-[1.75rem] p-5 shadow-soft">
@@ -88,8 +88,8 @@ export function PlannerPage() {
             <button type="button" disabled={generating} onClick={createPlan} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-6 py-4 font-black text-white shadow-soft transition hover:bg-river active:scale-[0.99] disabled:cursor-wait disabled:opacity-70">{generating ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}{generating ? 'AI 正在识别必经地点…' : 'AI 个性化生成方案'}</button>
           </section>}
 
-          {resultMode && plan && <section ref={resultRef} className="space-y-4 scroll-mt-28">
-            <div className="flex flex-col justify-between gap-3 rounded-[1.5rem] bg-white/80 p-4 shadow-sm ring-1 ring-ink/5 md:flex-row md:items-center">
+          {resultMode && plan && <section ref={resultRef} className="space-y-3 scroll-mt-24">
+            <div className="flex flex-col justify-between gap-3 rounded-[1.25rem] bg-white/75 px-4 py-3 shadow-sm ring-1 ring-ink/5 backdrop-blur md:flex-row md:items-center md:px-5">
               <h2 className="font-display text-2xl font-black text-ink">{plan.route.title}</h2>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => { if (window.confirm('重置当前方案？真实手账和照片会保留。')) { resetPlan(); setResultMode(false); } }} className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-black text-ink shadow-sm"><RotateCcw className="h-4 w-4" />重置方案</button>
