@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { baseRoutes } from '../data/routeData';
-import { getDianpingSearchUrl, getHourlyChartScale, getPointServiceLinks } from './MapWorkspace';
+import { compactTravelTip, getDianpingSearchUrl, getHourlyChartScale, getPointServiceLinks } from './MapWorkspace';
 
 describe('getPointServiceLinks', () => {
   it('assigns every planned stop its own traceable representative cover', () => {
@@ -39,6 +39,19 @@ describe('getPointServiceLinks', () => {
     expect(links.bookingUrl).toContain(encodeURIComponent('宜昌 三峡游客中心'));
   });
 
+  it('opens the exact Wuhan University detail page instead of a city guide', () => {
+    const links = getPointServiceLinks({ name: '武汉大学', city: '武汉', type: 'scenic', lat: 30.538, lng: 114.365 });
+
+    expect(links.detailUrl).toBe('https://you.ctrip.com/sight/145/1493507.html');
+  });
+
+  it('falls back to an exact coordinate marker for an unmapped attraction', () => {
+    const links = getPointServiceLinks({ name: '临时点位', city: '武汉', type: 'scenic', lat: 30.5, lng: 114.3 });
+
+    expect(links.detailUrl).toContain('uri.amap.com/marker');
+    expect(links.detailUrl).toContain('position=114.3,30.5');
+  });
+
   it('binds every planned route point to a direct Ctrip page instead of the retired search route', () => {
     for (const route of Object.values(baseRoutes)) {
       for (const point of route.points) {
@@ -49,6 +62,19 @@ describe('getPointServiceLinks', () => {
         expect(links.bookingUrl, `${point.city} / ${point.name}`).toContain(encodeURIComponent(`${point.city} ${point.name}`));
       }
     }
+  });
+});
+
+describe('compactTravelTip', () => {
+  it('replaces verbose generated guidance with a concise note', () => {
+    expect(compactTravelTip('记录这一站是否符合“武汉两天一夜，预算600元，喜欢拍照和美食”的原始期待。', '记下最喜欢的细节。')).toBe('记下最喜欢的细节。');
+    expect(compactTravelTip('围绕“拍照”主题记录武汉大学，现场遵守拍摄与开放规定。', '拍下武汉大学的代表性画面。')).toBe('拍下武汉大学的代表性画面。');
+  });
+
+  it('caps long custom tips without producing a dense paragraph', () => {
+    const tip = compactTravelTip('这是一个非常非常长的拍摄建议，需要在卡片里保持简洁并避免占用过多空间。', '拍下代表性画面。', 16);
+    expect(tip.length).toBeLessThanOrEqual(16);
+    expect(tip).toMatch(/…$/);
   });
 });
 

@@ -126,8 +126,8 @@ function toRoutePoint(item: Record<string, any>, request: TripRequest, index: nu
     id: `amap-${String(item.id)}`, name: String(item.name), type: 'scenic', city: request.destinationCity,
     lng: Number(item.location.lng), lat: Number(item.location.lat), coordinateSystem: 'gcj02', time: '', stayMinutes: requested ? 90 : 60,
     reason: requested ? `这是你在首页明确提出的必经地点，已通过高德真实地点检索加入路线。${item.recommendationReason ? ` ${item.recommendationReason}` : ''}` : String(item.recommendationReason || `${item.district || request.destinationCity}的真实候选地点，符合本次个性化需求。`),
-    photoTip: `围绕“${request.interests[0] || '旅行'}”主题记录${item.name}，现场遵守拍摄与开放规定。`,
-    recordTip: `记录这一站是否符合“${request.freeText.slice(0, 40)}”的原始期待。`,
+    photoTip: `拍下${item.name}的代表性画面。`,
+    recordTip: '记下这一站最喜欢的细节。',
     day: Math.min(request.days, Math.floor(index / Math.max(1, Math.ceil(Math.min(10, Math.max(4, request.days * 3)) / request.days))) + 1),
     openingHours: item.openingHours || undefined,
   };

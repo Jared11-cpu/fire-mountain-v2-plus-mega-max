@@ -136,10 +136,9 @@ function Stops({ points, selectedId, fallbackImageUrl, dailyRecords, maxDays, on
       {expanded && <div className="space-y-4 p-4">
         <p className="text-sm font-bold leading-6 text-ink/65">{point.reason}</p>
         <div className="grid grid-cols-2 gap-2 text-xs font-bold"><InfoTile icon={Clock3} label="停留时间" value={`${point.durationMinutes} 分钟`} /><InfoTile icon={Navigation} label="下一段交通" value={point.travelMinutesToNext ? `${point.travelMinutesToNext} 分钟` : '行程终点'} /></div>
-        <div className="space-y-2 rounded-2xl bg-[#f1f6f2] p-3 text-xs leading-5 text-ink/65"><p className="flex gap-2"><Camera className="mt-0.5 h-4 w-4 shrink-0 text-river" /><span><strong className="text-ink">拍摄建议：</strong>{point.photoTip}</span></p><p className="flex gap-2"><NotebookPen className="mt-0.5 h-4 w-4 shrink-0 text-tower" /><span><strong className="text-ink">记录重点：</strong>{point.recordTip}</span></p></div>
-        <PointServiceLinks pointName={point.name} links={serviceLinks} />
+        <div className="grid gap-2 rounded-2xl bg-[#f1f6f2] p-3 text-xs leading-5 text-ink/65"><p className="flex gap-2"><Camera className="mt-0.5 h-4 w-4 shrink-0 text-river" /><span><strong className="text-ink">拍摄：</strong>{compactTravelTip(point.photoTip, `拍下${point.name}的代表性画面。`)}</span></p><p className="flex gap-2"><NotebookPen className="mt-0.5 h-4 w-4 shrink-0 text-tower" /><span><strong className="text-ink">记录：</strong>{compactTravelTip(point.recordTip, '记下最喜欢的细节。')}</span></p></div>
         <section className="rounded-2xl border border-ink/10 p-3"><div className="mb-3 flex items-center justify-between"><strong className="text-sm">我的地点安排</strong><span className="rounded-full bg-jade/10 px-2 py-1 text-[10px] font-black text-jade">自动保存</span></div><div className="grid grid-cols-2 gap-2"><label className="text-[11px] font-black text-ink/50">安排日期<select value={point.day ?? 1} onChange={(event) => onPatchPoint(point.id, { day: Number(event.target.value) })} className="focus-ring mt-1 w-full rounded-xl border border-ink/10 bg-white px-2 py-2 text-sm font-bold text-ink">{Array.from({ length: maxDays }, (_, day) => <option key={day + 1} value={day + 1}>第{day + 1}天</option>)}</select></label><label className="text-[11px] font-black text-ink/50">停留分钟<input type="number" min={10} max={480} step={5} value={point.durationMinutes} onChange={(event) => onPatchPoint(point.id, { durationMinutes: Math.max(10, Number(event.target.value) || 10) })} className="focus-ring mt-1 w-full rounded-xl border border-ink/10 px-2 py-2 text-sm font-bold text-ink" /></label></div><label className="mt-3 block text-[11px] font-black text-ink/50">我的安排<textarea value={notes[point.id] ?? ''} placeholder="例如：提前预约、重点拍摄坝体全景、为老人预留休息时间" onChange={(event) => onPatchNote(point.id, event.target.value)} rows={3} className="focus-ring mt-1 w-full resize-none rounded-xl border border-ink/10 px-3 py-2 text-sm font-medium text-ink" /></label></section>
-        <div className="flex items-center justify-between gap-3">{point.imageCredit ? <a href={point.imageCredit.sourceUrl} target="_blank" rel="noreferrer" className="text-[10px] font-bold text-ink/40 underline decoration-ink/20 underline-offset-2">{point.imageCredit.author} · {point.imageCredit.license}</a> : <span className="text-[10px] font-bold text-ink/40">城市授权代表图</span>}<a href={serviceLinks.amapUrl} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white">高德地点详情<ExternalLink className="h-3.5 w-3.5" /></a></div>
+        <div className="flex items-center justify-between gap-3">{point.imageCredit ? <a href={point.imageCredit.sourceUrl} target="_blank" rel="noreferrer" className="text-[10px] font-bold text-ink/40 underline decoration-ink/20 underline-offset-2">{point.imageCredit.author} · {point.imageCredit.license}</a> : <span className="text-[10px] font-bold text-ink/40">城市授权代表图</span>}<a href={serviceLinks.detailUrl} target="_blank" rel="noreferrer" aria-label={`${point.name}地点详细信息`} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white transition hover:bg-river">地点详细信息<ExternalLink className="h-3.5 w-3.5" /></a></div>
       </div>}
     </article>; })}</div>;
 }
@@ -160,6 +159,8 @@ const CTRIP_DETAIL_URLS: Readonly<Record<string, string>> = {
   滨江公园夜景: 'https://you.ctrip.com/sight/yichang313/51550.html',
   昙华林: 'https://you.ctrip.com/sight/wuhan145/119307.html',
   黄鹤楼红墙: 'https://you.ctrip.com/sight/wuhan145/8979.html',
+  武汉大学: 'https://you.ctrip.com/sight/145/1493507.html',
+  武汉长江大桥: 'https://you.ctrip.com/sight/wuhan145/8978.html',
   粮道街: 'https://you.ctrip.com/sight/wuhan145/71454382.html',
   江汉关: 'https://you.ctrip.com/sight/wuhan145/1489369.html',
   汉口江滩日落: 'https://you.ctrip.com/sight/wuhan145/119534.html',
@@ -185,43 +186,34 @@ const CTRIP_DETAIL_URLS: Readonly<Record<string, string>> = {
   团城山公园: 'https://you.ctrip.com/sight/huangshi710/52097.html',
 };
 
-const CTRIP_CITY_GUIDES: Readonly<Record<string, string>> = {
-  宜昌: 'https://you.ctrip.com/place/yichang313.html',
-  武汉: 'https://you.ctrip.com/place/wuhan145.html',
-  恩施: 'https://you.ctrip.com/place/enshicity1446196.html',
-  荆州: 'https://you.ctrip.com/place/jingzhou413.html',
-  襄阳: 'https://you.ctrip.com/place/xiangyang414.html',
-  黄石: 'https://you.ctrip.com/place/huangshi710.html',
-};
-
-export function getPointServiceLinks(point: Pick<RoutePoint, 'name' | 'city' | 'type'>): PointServiceLinkSet {
+export function getPointServiceLinks(point: Pick<RoutePoint, 'name' | 'city' | 'type'> & Partial<Pick<RoutePoint, 'lat' | 'lng'>>): PointServiceLinkSet {
   const keyword = encodeURIComponent(`${point.city} ${point.name}`);
   const isRailwayStation = point.type === 'start' && /(?:站|高铁站|火车站)$/.test(point.name.trim());
   const ctripTicketSearchUrl = `https://m.ctrip.com/webapp/ticket/index.html#/dest/k-keyword-0/s-tickets?keyword=${keyword}`;
+  const exactAmapUrl = Number.isFinite(point.lng) && Number.isFinite(point.lat)
+    ? `https://uri.amap.com/marker?position=${point.lng},${point.lat}&name=${encodeURIComponent(point.name)}`
+    : `https://uri.amap.com/search?keyword=${keyword}&city=${encodeURIComponent(point.city)}`;
   return {
     kind: isRailwayStation ? 'railway' : 'attraction',
-    amapUrl: `https://uri.amap.com/search?keyword=${keyword}&city=${encodeURIComponent(point.city)}`,
+    amapUrl: exactAmapUrl,
     detailUrl: isRailwayStation
       ? 'https://kyfw.12306.cn/mormhweb/czyd_2143/'
-      : CTRIP_DETAIL_URLS[point.name] ?? CTRIP_CITY_GUIDES[point.city] ?? 'https://you.ctrip.com/',
+      : CTRIP_DETAIL_URLS[point.name] ?? exactAmapUrl,
     bookingUrl: isRailwayStation
       ? 'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc'
       : ctripTicketSearchUrl,
   };
 }
 
-function PointServiceLinks({ pointName, links }: { pointName: string; links: PointServiceLinkSet }) {
-  const railway = links.kind === 'railway';
-  return <section aria-label={`${pointName}外部服务`} className={`overflow-hidden rounded-2xl border ${railway ? 'border-[#d94141]/15 bg-[#fff8f7]' : 'border-river/12 bg-gradient-to-br from-[#eef8f5] to-[#f8fbf4]'}`}>
-    <div className="flex items-start gap-3 p-3.5">
-      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${railway ? 'bg-[#d94141] text-white' : 'bg-river text-white'}`}>{railway ? <TrainFront className="h-4 w-4" /> : <MapPin className="h-4 w-4" />}</span>
-      <div className="min-w-0 flex-1"><strong className="block text-sm text-ink">{railway ? `铁路站点 · ${pointName}` : `旅行服务 · ${pointName}`}</strong><p className="mt-1 text-[10px] font-bold leading-4 text-ink/45">{railway ? '前往中国铁路 12306 官方页面核对车站引导、车次与余票。' : '携程页面提供地点攻略、开放信息与可预订门票；价格和库存以打开页面为准。'}</p></div>
-    </div>
-    <div className="grid grid-cols-2 border-t border-ink/8 bg-white/65">
-      <a href={links.detailUrl} target="_blank" rel="noreferrer" aria-label={`${pointName}${railway ? '12306车站引导' : '携程旅游详情'}`} className="inline-flex items-center justify-center gap-1.5 border-r border-ink/8 px-3 py-3 text-xs font-black text-river transition hover:bg-white">{railway ? '12306 车站引导' : '携程旅游详情'}<ExternalLink className="h-3.5 w-3.5" /></a>
-      <a href={links.bookingUrl} target="_blank" rel="noreferrer" aria-label={`${pointName}${railway ? '12306官方购票' : '携程门票活动'}`} className={`inline-flex items-center justify-center gap-1.5 px-3 py-3 text-xs font-black transition hover:bg-white ${railway ? 'text-[#c83232]' : 'text-tower'}`}>{railway ? '12306 官方购票' : '携程门票 / 活动'}<ExternalLink className="h-3.5 w-3.5" /></a>
-    </div>
-  </section>;
+export function compactTravelTip(value: string, fallback: string, maxLength = 30) {
+  const normalized = value.trim()
+    .replace(/^围绕“[^”]+”主题记录[^，。]*[，,]?/, '')
+    .replace(/^记录这一站是否符合“[^”]+”的原始期待[。.]?$/, fallback)
+    .replace(/现场遵守拍摄与开放规定[。.]?/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const text = normalized || fallback;
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1).replace(/[，。；、,.!?！？]$/, '')}…` : text;
 }
 
 function InfoTile({ icon: Icon, label, value }: { icon: typeof Clock3; label: string; value: string }) { return <div className="rounded-2xl bg-ink/[0.045] p-3"><Icon className="mb-2 h-4 w-4 text-river" /><span className="block text-[10px] text-ink/45">{label}</span><strong className="mt-0.5 block text-ink">{value}</strong></div>; }
