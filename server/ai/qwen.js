@@ -12,11 +12,12 @@ export async function extractTravelRequest(userText, env) {
     city: 'string|null', startDate: 'YYYY-MM-DD|null', days: 'number|null', people: 'number|null',
     budgetPerPerson: 'number|null', interests: 'string[]', dietaryNeeds: 'string[]', mobility: 'string|null',
     transportPreference: 'string|null', hotelPreference: 'string|null', departureDeadline: 'string|null',
+    requestedPlaces: 'string[]', avoidPlaces: 'string[]', travelStyle: 'string|null',
   };
   const result = await qwenJson(env, {
     model: env.AI_EXTRACT_MODEL || 'qwen-flash',
     temperature: 0.1,
-    system: `你是旅游需求结构化提取器。必须只返回合法 JSON，不得编造用户未提供的信息；不确定字段用 null，数组缺省为空数组。字段约束：${JSON.stringify(schema)}。`,
+    system: `你是旅游需求结构化提取器。必须只返回合法 JSON，不得编造用户未提供的信息；不确定字段用 null，数组缺省为空数组。requestedPlaces 必须逐项保留用户明确想去、想看、参观、经过或必去的地点名称，不能用泛化兴趣替代；即使存在口语或轻微错别字，也应提取可用于地图检索的核心专名（例如文本提到“三峡”就保留“三峡”）。avoidPlaces 只提取明确要求避开的地点。字段约束：${JSON.stringify(schema)}。`,
     user: text,
   });
   return validateTravelRequest(result);
@@ -81,6 +82,7 @@ function validateTravelRequest(value) {
     city: nullableString(value.city), startDate: dateOrNull(value.startDate), days: nullableNumber(value.days, 1, 60), people: nullableNumber(value.people, 1, 100),
     budgetPerPerson: nullableNumber(value.budgetPerPerson, 0, 10_000_000), interests: stringArray(value.interests, 30), dietaryNeeds: stringArray(value.dietaryNeeds, 30),
     mobility: nullableString(value.mobility), transportPreference: nullableString(value.transportPreference), hotelPreference: nullableString(value.hotelPreference), departureDeadline: nullableString(value.departureDeadline),
+    requestedPlaces: stringArray(value.requestedPlaces, 10), avoidPlaces: stringArray(value.avoidPlaces, 10), travelStyle: nullableString(value.travelStyle),
   };
 }
 

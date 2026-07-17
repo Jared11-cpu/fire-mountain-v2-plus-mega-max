@@ -34,7 +34,7 @@ export function LandingPage({ onStart, onCitySelect, onFootprintDetail }: Landin
                 value={prompt}
                 onChange={(event)=>setPrompt(event.target.value)}
                 className="min-w-0 flex-1 bg-transparent text-base font-semibold text-ink outline-none placeholder:text-ink/35"
-                placeholder="例如：恩施三天两夜，预算 1000，喜欢峡谷和拍照"
+                placeholder="例如：武汉两天，必须去武汉长江大桥，喜欢历史和江景"
               />
               <button type="submit" aria-label="发送旅行需求" className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-tower text-white transition hover:scale-105 active:scale-95"><Send className="h-4 w-4" /></button>
             </form>
@@ -43,7 +43,7 @@ export function LandingPage({ onStart, onCitySelect, onFootprintDetail }: Landin
                 onClick={() => onStart()}
                 className="group inline-flex items-center justify-center gap-2 rounded-full bg-ink px-7 py-3.5 font-black text-white shadow-soft transition hover:-translate-y-1 hover:bg-river active:scale-95"
               >
-                立即生成行程
+                AI 个性化生成行程
                 <ArrowRight className="h-5 w-5 transition group-hover:translate-x-1" />
               </button>
             </div>

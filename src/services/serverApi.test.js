@@ -22,10 +22,10 @@ describe('Sites API router', () => {
   });
 
   it('parses a Qwen JSON travel request and normalizes fields', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ city: '武汉', startDate: null, days: 2, people: 1, budgetPerPerson: 500, interests: ['历史'], dietaryNeeds: [], mobility: null, transportPreference: '地铁', hotelPreference: null, departureDeadline: null }) } }] }), { status: 200 })));
-    const response = await worker.fetch(new Request('https://example.test/api/ai/parse-request', { method: 'POST', body: JSON.stringify({ text: '我想一个人去武汉玩两天，预算500，喜欢历史和地铁出行' }) }), { DASHSCOPE_API_KEY: 'test' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ city: '武汉', startDate: null, days: 2, people: 1, budgetPerPerson: 500, interests: ['历史'], dietaryNeeds: [], mobility: null, transportPreference: '地铁', hotelPreference: null, departureDeadline: null, requestedPlaces: ['武汉长江大桥'], avoidPlaces: [], travelStyle: '历史江景' }) } }] }), { status: 200 })));
+    const response = await worker.fetch(new Request('https://example.test/api/ai/parse-request', { method: 'POST', body: JSON.stringify({ text: '我想一个人去武汉长江大桥，玩两天，预算500，喜欢历史和地铁出行' }) }), { DASHSCOPE_API_KEY: 'test' });
     expect(response.status).toBe(200);
-    expect((await response.json()).data).toMatchObject({ city: '武汉', days: 2, people: 1, transportPreference: '地铁' });
+    expect((await response.json()).data).toMatchObject({ city: '武汉', days: 2, people: 1, transportPreference: '地铁', requestedPlaces: ['武汉长江大桥'] });
   });
 
   it('returns normalized real restaurant facts from AMap', async () => {
