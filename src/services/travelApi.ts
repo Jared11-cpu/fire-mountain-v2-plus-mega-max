@@ -69,6 +69,7 @@ async function recommendAttractions(request: TripRequest): Promise<RoutePoint[]>
   const queryTerms = [...new Set([...required, ...request.interests.map((item) => interestTerms[item]).filter(Boolean), '热门景点'])].slice(0, 7);
   const searches = await Promise.allSettled(queryTerms.map(async (query) => {
     const params = new URLSearchParams({ city: request.destinationCity, keywords: query, pageSize: '10' });
+    if (required.includes(query)) params.set('allTypes', '1');
     const response = await fetch(apiUrl(`/api/attractions/search?${params}`));
     const payload = await readPayload(response, `“${query}”地点检索失败`);
     return { query, items: Array.isArray(payload.items) ? payload.items as Array<Record<string, any>> : [] };
