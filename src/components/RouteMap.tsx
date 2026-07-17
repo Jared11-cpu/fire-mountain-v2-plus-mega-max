@@ -427,3 +427,4 @@ function lngLatToWorld(lng: number, lat: number, zoom: number) {
     y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * size,
   };
 }
+

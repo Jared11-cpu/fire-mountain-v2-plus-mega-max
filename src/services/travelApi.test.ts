@@ -13,16 +13,23 @@ describe('travel backend integration', () => {
     expect(fetcher.mock.calls[0][0]).toBe('/api/ai/parse-request');
   });
 
-  it('enriches the existing plan without changing its page contract', async () => {
-    const request = defaultTripRequest('武汉');
-    const plan = generateTripPlan(request, null);
-    const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { analysis: '该路线匹配用户的美食与拍照偏好。' } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ recommendations: [{ id: 'poi-1', name: '真实湖北菜馆', district: '江汉区', address: '测试路1号', averageCost: 68, category: '湖南菜', recommendationReason: '预算匹配', location: { lng: 114.3, lat: 30.5 } }] }), { status: 200 }));
+  it('forces an explicitly requested AMap place into the personalized route', async () => {
+    const request = { ...defaultTripRequest('武汉'), freeText: '武汉两天，必须去武汉长江大桥，喜欢历史和江景', requestedPlaces: ['武汉长江大桥'], interests: ['历史文化'] as const };
+    const plan = generateTripPlan(request as never, null);
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/attractions/search')) return new Response(JSON.stringify({ items: [{ id: 'bridge', name: '武汉长江大桥', district: '武昌区', address: '长江之上', location: { lng: 114.288, lat: 30.55 } }, { id: 'museum', name: '湖北省博物馆', district: '武昌区', location: { lng: 114.367, lat: 30.56 } }] }), { status: 200 });
+      if (url.endsWith('/api/ai/recommend')) return new Response(JSON.stringify({ data: { status: 'ok', ranked: [{ id: 'museum', reason: '符合历史偏好', fitScore: 90 }, { id: 'bridge', reason: '用户明确要求', fitScore: 100 }], warnings: [] } }), { status: 200 });
+      if (url.endsWith('/api/restaurants/guide')) return new Response(JSON.stringify({ recommendations: [{ id: 'poi-1', name: '真实湖北菜馆', district: '江汉区', address: '测试路1号', averageCost: 68, category: '湖北菜', recommendationReason: '预算匹配', location: { lng: 114.3, lat: 30.5 } }] }), { status: 200 });
+      if (url.endsWith('/api/ai/analyze')) return new Response(JSON.stringify({ data: { analysis: '路线包含用户指定的武汉长江大桥，并补充历史文化地点。' } }), { status: 200 });
+      return new Response(JSON.stringify({ error: 'unexpected request' }), { status: 500 });
+    });
     vi.stubGlobal('fetch', fetcher);
-    const result = await enrichTripPlanWithBackend(plan, request);
-    expect(result.analysis).toContain('匹配用户');
+    const result = await enrichTripPlanWithBackend(plan, request as never);
+    expect(result.analysis).toContain('武汉长江大桥');
+    expect(result.routePoints?.[0]).toMatchObject({ name: '武汉长江大桥', lat: 30.55, lng: 114.288 });
+    expect(result.routePoints?.[0].reason).toContain('首页明确提出的必经地点');
     expect(result.foods?.[0]).toMatchObject({ id: 'poi-1', name: '真实湖北菜馆', priceRange: '约 ¥68/人' });
-    expect(fetcher.mock.calls.map((call) => call[0])).toEqual(['/api/ai/analyze', '/api/restaurants/guide']);
+    expect(fetcher.mock.calls.map((call) => String(call[0]))).toEqual(expect.arrayContaining([expect.stringContaining('/api/attractions/search'), '/api/ai/recommend', '/api/restaurants/guide', '/api/ai/analyze']));
   });
 });
