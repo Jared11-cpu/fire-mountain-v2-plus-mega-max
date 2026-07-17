@@ -15,7 +15,7 @@ export async function searchPois(env, query, category = 'poi') {
   const page = clamp(query.get('page'), 1, 100, 1);
   const params = new URLSearchParams({ key, keywords, page_size: String(pageSize), page_num: String(page), show_fields: 'business,photos,navi' });
   if (region) params.set('region', region);
-  const types = query.get('types') || categoryTypes(category);
+  const types = query.get('allTypes') === '1' ? '' : (query.get('types') || categoryTypes(category));
   if (types) params.set('types', types);
   const location = validCoordinate(query.get('location'));
   if (location) params.set('location', location);

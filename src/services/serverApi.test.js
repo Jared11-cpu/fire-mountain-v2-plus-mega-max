@@ -66,6 +66,15 @@ describe('Sites API router', () => {
     expect(fetcher.mock.calls[1][0]).toContain('city2=0731');
   });
 
+  it('searches explicit required places across all AMap POI types', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: '1', count: '1', pois: [{ id: 'bridge', name: '武汉长江大桥', type: '地名地址信息', location: '114.288,30.550' }] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetcher);
+    const response = await worker.fetch(new Request('https://example.test/api/attractions/search?city=武汉&keywords=武汉长江大桥&allTypes=1'), { AMAP_WEB_SERVICE_KEY: 'test' });
+    expect(response.status).toBe(200);
+    expect((await response.json()).items[0].name).toBe('武汉长江大桥');
+    expect(fetcher.mock.calls[0][0]).not.toContain('types=');
+  });
+
   it('converts WGS-84 coordinates before server-side driving planning', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', locations: '114.006000,30.006000' }), { status: 200 }))
