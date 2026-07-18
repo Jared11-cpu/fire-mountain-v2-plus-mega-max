@@ -267,31 +267,13 @@ export function TripProvider({ children }: { children: ReactNode }) {
     return { ...plan, settings: { ...settings, targetPointCount: routePoints.length, targetDurationMinutes: actualDuration }, route: { ...plan.route, points: routePoints } };
   }), [patchPlan]);
   const updateBudgetItems = useCallback((items: BudgetItem[]) => {
-    const total = budgetTotal(items);
-    const request = { ...state.request, budget: total };
-    dispatch({ type: 'request', request });
-    if (state.plan) dispatch({ type: 'plan', plan: syncPlanBudget(state.plan, items, request) });
-  }, [state.plan, state.request]);
+    if (state.plan) dispatch({ type: 'plan', plan: { ...state.plan, budgetItems: items, updatedAt: new Date().toISOString() } });
+  }, [state.plan]);
   const setBudgetTotal = useCallback((value: number) => {
     const total = Math.max(0, Math.round(Number(value) || 0));
-    const currentTotal = state.plan ? budgetTotal(state.plan.budgetItems) : 0;
-    let items = state.plan?.budgetItems ?? [];
-    if (!items.length) {
-      items = [{ id: `budget-${crypto.randomUUID()}`, item: '方案预算', amount: total, note: '' }];
-    } else if (currentTotal > 0) {
-      let assigned = 0;
-      items = items.map((item, index) => {
-        const remaining = Math.max(0, total - assigned);
-        const amount = index === items.length - 1 ? remaining : Math.min(remaining, Math.round((item.amount / currentTotal) * total));
-        assigned += amount;
-        return { ...item, amount: Math.max(0, amount) };
-      });
-    } else {
-      items = items.map((item, index) => ({ ...item, amount: index === 0 ? total : 0 }));
-    }
     const request = { ...state.request, budget: total };
     dispatch({ type: 'request', request });
-    if (state.plan) dispatch({ type: 'plan', plan: syncPlanBudget(state.plan, items, request) });
+    if (state.plan) dispatch({ type: 'plan', plan: syncPlanTargetBudget(state.plan, request) });
   }, [state.plan, state.request]);
   const setJournalEntries = useCallback((entries: JournalEntry[]) => dispatch({ type: 'journal', entries }), []);
   const resetPlan = useCallback(() => {
@@ -307,20 +289,18 @@ export function TripProvider({ children }: { children: ReactNode }) {
   return <TripContext.Provider value={value}>{children}<GlobalStatus state={state} /></TripContext.Provider>;
 }
 
-function syncPlanBudget(plan: TripPlan, items: BudgetItem[], request: TripRequest): TripPlan {
+function syncPlanTargetBudget(plan: TripPlan, request: TripRequest): TripPlan {
   const previousBudget = plan.requestSnapshot.budget;
   const total = request.budget;
   const replaceBudget = (text: string) => text.replace(new RegExp(`${previousBudget}\\s*元`, 'g'), `${total}元`);
   return {
     ...plan,
     updatedAt: new Date().toISOString(),
-    budgetItems: items,
     requestSnapshot: request,
     content: {
       ...plan.content,
       title: replaceBudget(plan.content.title),
       summary: replaceBudget(plan.content.summary),
-      budget: items.map(({ item, amount, note }) => ({ item, amount, note })),
       socialCopy: buildSocialCopy(request),
       videoScript: plan.content.videoScript.map(replaceBudget),
     },

@@ -101,6 +101,18 @@ describe('dates, timeline and plan integrity', () => {
     expect(budgetTotal([{ id: '1', item: 'A', amount: 20, note: '' }, { id: '2', item: 'B', amount: 30, note: '' }])).toBe(50);
   });
 
+  it('新方案的计划预算与实际支出相互独立', () => {
+    const request = defaultTripRequest('宜昌');
+    const plan = generateTripPlan(request);
+    expect(plan.requestSnapshot.budget).toBe(600);
+    expect(budgetTotal(plan.budgetItems)).toBe(0);
+
+    const spent = { ...plan, budgetItems: [{ id: 'spent', item: '交通', amount: 88, note: '' }] };
+    const replanned = generateTripPlan({ ...request, budget: 900 }, spent);
+    expect(replanned.requestSnapshot.budget).toBe(900);
+    expect(budgetTotal(replanned.budgetItems)).toBe(88);
+  });
+
   it('复制文案随当前城市、天数、预算和兴趣更新', () => {
     const request = { ...defaultTripRequest('武汉'), days: 3, budget: 1200, interests: ['历史文化', '美食'] as const };
     const copy = buildSocialCopy(request as never);

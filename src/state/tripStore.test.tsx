@@ -15,7 +15,7 @@ function Harness() {
     <output data-testid="plan-snapshot-budget">{plan?.requestSnapshot.budget ?? 0}</output>
     <button onClick={() => updateRequest({ destinationCity: '恩施', days: 3, budget: 1000 })}>同步</button>
     <button onClick={generate}>生成</button>
-    <button onClick={() => updateBudgetItems([{ id: 'x', item: '交通', amount: 88, note: '' }])}>预算</button>
+    <button onClick={() => updateBudgetItems([{ id: 'x', item: '交通', amount: 88, note: '' }])}>支出88</button>
     <button onClick={() => setBudgetTotal(500)}>预算总计500</button>
     <button onClick={() => setJournalEntries([{ id: 'j', pointId: 'p', pointName: '真实点', city: '武汉', day: 1, note: '真实', visitedAt: '2026-07-13', photoIds: [] }])}>手账</button>
   </div>;
@@ -40,9 +40,11 @@ describe('TripProvider persistence', () => {
     const user = userEvent.setup();
     render(<TripProvider><Harness /></TripProvider>);
     await user.click(screen.getByText('生成'));
-    await user.click(screen.getByText('预算'));
+    await user.click(screen.getByText('支出88'));
     await user.click(screen.getByText('手账'));
     expect(screen.getByTestId('budget')).toHaveTextContent('88');
+    expect(screen.getByTestId('request')).toHaveTextContent('宜昌|2|600');
+    expect(screen.getByTestId('plan-snapshot-budget')).toHaveTextContent('600');
     expect(screen.getByTestId('journal')).toHaveTextContent('1');
     await act(() => new Promise((resolve) => setTimeout(resolve, 450)));
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
@@ -50,10 +52,11 @@ describe('TripProvider persistence', () => {
     expect(saved.journalEntries).toHaveLength(1);
   });
 
-  it('预算总计修改后同步标题、摘要、请求快照和传播文案', async () => {
+  it('计划预算修改后同步方案文案，但不改动实际支出', async () => {
     const user = userEvent.setup();
     render(<TripProvider><Harness /></TripProvider>);
     await user.click(screen.getByText('生成'));
+    await user.click(screen.getByText('支出88'));
     await user.click(screen.getByText('预算总计500'));
 
     expect(screen.getByTestId('plan-title')).toHaveTextContent('500元版');
@@ -62,5 +65,6 @@ describe('TripProvider persistence', () => {
     expect(screen.getByTestId('plan-copy')).toHaveTextContent('总预算500元');
     expect(screen.getByTestId('plan-snapshot-budget')).toHaveTextContent('500');
     expect(screen.getByTestId('request')).toHaveTextContent('宜昌|2|500');
+    expect(screen.getByTestId('budget')).toHaveTextContent('88');
   });
 });

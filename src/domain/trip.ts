@@ -229,7 +229,7 @@ export function generateTripPlan(requestInput: TripRequest, previous?: TripPlan 
     content,
     route,
     settings: { targetPointCount, targetDurationMinutes: totalPlanMinutes(points), departureTime },
-    budgetItems: previous && previous.requestSnapshot.budget === request.budget ? previous.budgetItems : content.budget.map((row, index) => ({ ...row, id: `budget-${index}` })),
+    budgetItems: previous?.budgetItems ?? content.budget.map((row, index) => ({ ...row, id: `budget-${index}`, amount: 0, note: '' })),
     dailyRecords,
     pointNotes: previous?.pointNotes ?? {},
     foodRecommendations: filterFoods(request),
@@ -251,7 +251,7 @@ export function calculateTimeline(points: RoutePoint[], departureTime: string): 
 
 export function comparePlans(previous: TripPlan, next: TripPlan): PlanDifference {
   const pointDelta = next.route.points.length - previous.route.points.length;
-  const budgetDelta = budgetTotal(next.budgetItems) - budgetTotal(previous.budgetItems);
+  const budgetDelta = next.requestSnapshot.budget - previous.requestSnapshot.budget;
   const durationDelta = next.settings.targetDurationMinutes - previous.settings.targetDurationMinutes;
   const changed = previous.lastRequestHash !== next.lastRequestHash || pointDelta !== 0 || budgetDelta !== 0 || durationDelta !== 0;
   return {
