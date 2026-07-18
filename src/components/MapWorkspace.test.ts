@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { baseRoutes } from '../data/routeData';
+import type { TransportPlanResponse } from '../services/transportService';
 import { compactTravelTip, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointServiceLinks, getVerifiedCtripDetailUrl, isDirectCtripDetailUrl } from './MapWorkspace';
+import { getFocusedTransportPath } from './RouteMap';
 
 describe('getPointServiceLinks', () => {
   it('assigns every planned stop its own traceable representative cover', () => {
@@ -143,5 +145,19 @@ describe('getBudgetUsageVisual', () => {
     expect(getBudgetUsageVisual(900, 600).color).toBe('hsl(358 77% 35%)');
     expect(getBudgetUsageVisual(1200, 600).color).toBe('hsl(352 78% 24%)');
     expect(getBudgetUsageVisual(1800, 600).color).toBe(getBudgetUsageVisual(1200, 600).color);
+  });
+});
+
+describe('getFocusedTransportPath', () => {
+  it('returns only the selected segment geometry for map focus', () => {
+    const plan = {
+      segments: [
+        { id: 'segment-1', legs: [{ polyline: [[111, 30], [111.1, 30.1]] }] },
+        { id: 'segment-2', legs: [{ polyline: [[112, 31], [112.1, 31.1]] }, { polyline: [[112.1, 31.1], [112.2, 31.2]] }] },
+      ],
+    } as TransportPlanResponse;
+
+    expect(getFocusedTransportPath(plan, 'segment-2')).toEqual([[112, 31], [112.1, 31.1], [112.1, 31.1], [112.2, 31.2]]);
+    expect(getFocusedTransportPath(plan, 'missing')).toEqual([]);
   });
 });

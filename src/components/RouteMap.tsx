@@ -3,19 +3,22 @@ import { AlertTriangle, Camera, Clock3, MapPin, Navigation, RefreshCw, Route as 
 import type { RoutePoint, SmartRoute } from '../types/route';
 import { getPointTypeLabel } from '../services/mapService';
 import { classifyDrivingFailure, convertGpsPoint, loadAmapJsApi, planBackendDrivingRoute, resetAmapJsApiLoader, type DrivingSearchFailure, type RoadPlanMetrics, type RoadPlanStatus } from '../services/amapDriving';
-import type { TransportPlanResponse, TransitLegMode } from '../services/transportService';
+import type { TransportPlanResponse, TransportSegment, TransitLegMode } from '../services/transportService';
 
 declare global { interface Window { AMap?: any; _AMapSecurityConfig?: { securityJsCode: string } } }
 
 export type RouteMapJournalCard = { id: string; note: string; photoUrl?: string };
-type Props = { route: SmartRoute; transportPlan?: TransportPlanResponse | null; selectedPointId?: string; activePointIndex: number; navigating: boolean; onSelectPoint: (point: RoutePoint) => void; onRoadPlanChange?: (metrics: RoadPlanMetrics) => void; mapOnly?: boolean; journalCards?: RouteMapJournalCard[] };
+type Props = { route: SmartRoute; transportPlan?: TransportPlanResponse | null; focusedTransportSegmentId?: string | null; selectedPointId?: string; activePointIndex: number; navigating: boolean; onSelectPoint: (point: RoutePoint) => void; onRoadPlanChange?: (metrics: RoadPlanMetrics) => void; mapOnly?: boolean; journalCards?: RouteMapJournalCard[] };
+type TransportOverlayEntry = { outline: any; line: any; color: string; weight: number };
 const icons: Record<RoutePoint['type'], typeof MapPin> = { start: Navigation, scenic: MapPin, food: Utensils, photo: Camera, rest: Clock3, hotel: MapPin, end: RouteIcon };
 
-export function RouteMap({ route, transportPlan, selectedPointId, onSelectPoint, onRoadPlanChange, mapOnly = false, journalCards = [] }: Props) {
+export function RouteMap({ route, transportPlan, focusedTransportSegmentId, selectedPointId, onSelectPoint, onRoadPlanChange, mapOnly = false, journalCards = [] }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>();
   const markerRef = useRef<any[]>([]);
   const overlayRef = useRef<any[]>([]);
+  const focusOverlayRef = useRef<any[]>([]);
+  const transportOverlayGroupsRef = useRef<Record<string, TransportOverlayEntry[]>>({});
   const drivingRef = useRef<any[]>([]);
   const requestIdRef = useRef(0);
   const [status, setStatus] = useState<RoadPlanStatus>('loading');
@@ -30,6 +33,7 @@ export function RouteMap({ route, transportPlan, selectedPointId, onSelectPoint,
   const routeSignature = useMemo(() => route.points.map(({ id, lng, lat, roadAccessLng, roadAccessLat, coordinateSystem }) => `${id}:${lng},${lat}:${roadAccessLng},${roadAccessLat}:${coordinateSystem}`).join('|'), [route.points]);
   const journalCardSignature = useMemo(() => journalCards.map(({ id, note, photoUrl }) => `${id}:${note}:${photoUrl ?? ''}`).join('|'), [journalCards]);
   const transportSignature = useMemo(() => transportPlan?.source === 'transport-api' ? transportPlan.segments.flatMap((segment) => segment.legs).map((leg) => `${leg.id}:${leg.mode}:${leg.polyline.length}`).join('|') : '', [transportPlan]);
+  const focusedTransportPath = useMemo(() => getFocusedTransportPath(transportPlan, focusedTransportSegmentId), [transportPlan, focusedTransportSegmentId]);
 
   useEffect(() => {
     let disposed = false;
@@ -45,12 +49,15 @@ export function RouteMap({ route, transportPlan, selectedPointId, onSelectPoint,
       for (const driving of drivingRef.current) driving?.clear?.();
       drivingRef.current = [];
       if (mapRef.current) {
+        if (focusOverlayRef.current.length) mapRef.current.remove?.(focusOverlayRef.current);
         if (overlayRef.current.length) mapRef.current.remove?.(overlayRef.current);
         if (markerRef.current.length) mapRef.current.remove?.(markerRef.current);
         mapRef.current.clearMap?.();
         mapRef.current.destroy?.();
       }
       overlayRef.current = [];
+      focusOverlayRef.current = [];
+      transportOverlayGroupsRef.current = {};
       markerRef.current = [];
       mapRef.current = undefined;
     };
@@ -60,7 +67,8 @@ export function RouteMap({ route, transportPlan, selectedPointId, onSelectPoint,
       setMapAvailable(false);
       setRasterPath([]);
       publish({ status: 'loading', source: 'estimate', message: '正在请求高德道路规划…' });
-      const liveLegs = transportPlan?.source === 'transport-api' ? transportPlan.segments.flatMap((segment) => segment.legs).filter((leg) => leg.polyline.length > 1) : [];
+      const liveSegments = transportPlan?.source === 'transport-api' ? transportPlan.segments.filter((segment) => segment.legs.some((leg) => leg.polyline.length > 1)) : [];
+      const liveLegs = liveSegments.flatMap((segment) => segment.legs).filter((leg) => leg.polyline.length > 1);
       let plannedPath: Array<[number, number]> = [];
       let plannedMetrics: RoadPlanMetrics;
       try {
@@ -111,7 +119,9 @@ export function RouteMap({ route, transportPlan, selectedPointId, onSelectPoint,
 
         markerRef.current = amapPoints.map((point, index) => createRouteMarker(AMap, map, point, index, onSelectPoint, point.id === selectedPointId, journalCards.find((card) => card.id === point.id)));
         if (liveLegs.length) {
-          overlayRef.current = addTransportPolylines(AMap, map, liveLegs);
+          const transportOverlays = addTransportPolylines(AMap, map, liveSegments);
+          overlayRef.current = transportOverlays.overlays;
+          transportOverlayGroupsRef.current = transportOverlays.groups;
           window.requestAnimationFrame(() => map.resize?.());
           map.setFitView([...overlayRef.current, ...markerRef.current], false, [90, 90, 90, 90]);
           return;
@@ -134,7 +144,7 @@ export function RouteMap({ route, transportPlan, selectedPointId, onSelectPoint,
   }, [route.id, routeSignature, route.totalDistanceKm, amapEnabled, key, securityCode, retryVersion, onRoadPlanChange, journalCardSignature, transportSignature]);
 
   useEffect(() => {
-    if (!selected || !mapAvailable || !mapRef.current) return;
+    if (!selected || focusedTransportSegmentId || !mapAvailable || !mapRef.current) return;
     mapRef.current.resize?.();
     mapRef.current.setZoomAndCenter(15, [selected.lng, selected.lat], false, 350);
     markerRef.current.forEach((marker, index) => {
@@ -144,14 +154,45 @@ export function RouteMap({ route, transportPlan, selectedPointId, onSelectPoint,
       const card = journalCards.find((item) => item.id === point.id);
       if (card) marker.setLabel?.({ content: markerLabelContent(point, index, card, active), direction: index % 2 ? 'left' : 'right', offset: new window.AMap.Pixel(index % 2 ? -12 : 12, -20) });
     });
-  }, [selected?.id, mapAvailable, journalCardSignature]);
+  }, [selected?.id, focusedTransportSegmentId, mapAvailable, journalCardSignature]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const AMap = window.AMap;
+    if (!mapAvailable || !map || !AMap) return;
+    const groups = transportOverlayGroupsRef.current;
+    const groupIds = Object.keys(groups);
+    if (groupIds.length) {
+      const focused = focusedTransportSegmentId ? groups[focusedTransportSegmentId] : undefined;
+      for (const [segmentId, entries] of Object.entries(groups)) {
+        const active = !focusedTransportSegmentId || segmentId === focusedTransportSegmentId;
+        for (const entry of entries) {
+          entry.outline.setOptions?.({ strokeOpacity: active ? 0.92 : 0.12, strokeWeight: active && focused ? entry.weight + 7 : entry.weight + 4, zIndex: active && focused ? 88 : 44 });
+          entry.line.setOptions?.({ strokeColor: focused && active ? '#f04438' : entry.color, strokeOpacity: active ? 0.98 : 0.16, strokeWeight: active && focused ? entry.weight + 3 : entry.weight, zIndex: active && focused ? 89 : 45 });
+        }
+      }
+      const focusedOverlays = focused?.flatMap((entry) => [entry.outline, entry.line]) ?? [];
+      map.resize?.();
+      map.setFitView(focusedOverlays.length ? focusedOverlays : [...overlayRef.current, ...markerRef.current], false, focusedOverlays.length ? [140, 110, 140, 110] : [90, 90, 90, 90]);
+      return;
+    }
+    if (focusOverlayRef.current.length) map.remove?.(focusOverlayRef.current);
+    focusOverlayRef.current = [];
+    if (focusedTransportPath.length > 1) {
+      focusOverlayRef.current = addFocusedPolyline(AMap, map, focusedTransportPath);
+      map.resize?.();
+      map.setFitView(focusOverlayRef.current, false, [140, 110, 140, 110]);
+    } else {
+      map.setFitView([...overlayRef.current, ...markerRef.current], false, [90, 90, 90, 90]);
+    }
+  }, [focusedTransportSegmentId, focusedTransportPath, mapAvailable, transportSignature]);
 
   const failed = status !== 'loading' && status !== 'planned';
   const usingTransitGeometry = transportPlan?.source === 'transport-api' && transportPlan.segments.some((segment) => segment.legs.some((leg) => leg.polyline.length > 1));
 
   return <section className={`min-w-0 overflow-hidden bg-white ${mapOnly ? 'h-full' : 'rounded-[1.75rem] shadow-soft ring-1 ring-ink/5'}`}>
     {!mapOnly && <div className="flex flex-col gap-4 border-b border-ink/5 p-5 md:flex-row md:items-center md:justify-between"><div><div className="inline-flex items-center gap-2 text-xs font-black tracking-[.16em] text-river"><Navigation className="h-4 w-4"/>LIVE ROUTE</div><h3 className="mt-2 font-display text-2xl font-black">{route.title}</h3><p className="mt-1 text-sm text-ink/50">{message}</p></div><div className="flex gap-2 text-xs font-bold"><span className="rounded-full bg-mist px-3 py-2">{route.totalDistanceKm} km</span><span className="rounded-full bg-mist px-3 py-2">{route.recommendedStartTime} 出发</span></div></div>}
-      <div className={mapOnly ? 'h-full min-w-0' : 'grid min-w-0 lg:grid-cols-[1.35fr_.65fr]'}><div className={`relative min-w-0 overflow-hidden bg-[#d8f1ee] ${mapOnly ? 'h-full min-h-[620px]' : 'min-h-[430px]'}`}><div ref={container} className={`absolute inset-0 ${!mapAvailable ? 'invisible' : ''}`}/>{mapAvailable && <div className="pointer-events-none absolute bottom-3 left-3 z-20 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black text-river shadow-sm">{usingTransitGeometry ? '动态公交/地铁路线' : '高德真实驾车路线'}</div>}{usingTransitGeometry && mapAvailable && <div className="pointer-events-none absolute bottom-12 left-3 z-20 flex flex-wrap gap-1.5 rounded-2xl bg-white/92 p-2 text-[9px] font-black shadow-sm"><MapLegend color="#c94f3d" label="地铁"/><MapLegend color="#0e6b72" label="公交"/><MapLegend color="#6b7280" label="步行" dashed/><MapLegend color="#d97706" label="驾车"/></div>}{!mapAvailable && status !== 'loading' && <GaodeRasterRouteMap route={route} roadPath={rasterPath} selectedPointId={selectedPointId} onSelectPoint={onSelectPoint} journalCards={journalCards} />}{status === 'loading' && <div className="absolute inset-0 grid place-items-center bg-[#d8f1ee]"><div className="rounded-2xl bg-white/90 px-5 py-4 text-sm font-black text-river shadow-soft">正在请求高德道路规划…</div></div>}{failed && <div role="alert" className="absolute left-4 right-4 top-20 z-30 rounded-2xl border border-red-200 bg-white/95 p-4 shadow-xl backdrop-blur"><div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500"/><div className="min-w-0 flex-1"><strong className="block text-sm text-red-700">道路规划失败，当前仅为点位连线</strong><p className="mt-1 text-xs font-bold leading-5 text-ink/55">{message}；仅为点位连线，不代表真实道路。</p></div><button type="button" onClick={() => { resetAmapJsApiLoader(); setRetryVersion((value) => value + 1); }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white"><RefreshCw className="h-3.5 w-3.5"/>重新规划</button></div></div>}</div>
+      <div className={mapOnly ? 'h-full min-w-0' : 'grid min-w-0 lg:grid-cols-[1.35fr_.65fr]'}><div className={`relative min-w-0 overflow-hidden bg-[#d8f1ee] ${mapOnly ? 'h-full min-h-[620px]' : 'min-h-[430px]'}`}><div ref={container} className={`absolute inset-0 ${!mapAvailable ? 'invisible' : ''}`}/>{mapAvailable && <div className={`pointer-events-none absolute bottom-3 left-3 z-20 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black shadow-sm ${focusedTransportSegmentId ? 'text-tower' : 'text-river'}`}>{focusedTransportSegmentId ? '已放大并高亮当前交通段' : usingTransitGeometry ? '动态公交/地铁路线' : '高德真实驾车路线'}</div>}{usingTransitGeometry && mapAvailable && <div className="pointer-events-none absolute bottom-12 left-3 z-20 flex flex-wrap gap-1.5 rounded-2xl bg-white/92 p-2 text-[9px] font-black shadow-sm"><MapLegend color="#c94f3d" label="地铁"/><MapLegend color="#0e6b72" label="公交"/><MapLegend color="#6b7280" label="步行" dashed/><MapLegend color="#d97706" label="驾车"/></div>}{!mapAvailable && status !== 'loading' && <GaodeRasterRouteMap route={route} roadPath={rasterPath} focusPath={focusedTransportPath} focusedTransportSegmentId={focusedTransportSegmentId} selectedPointId={selectedPointId} onSelectPoint={onSelectPoint} journalCards={journalCards} />}{status === 'loading' && <div className="absolute inset-0 grid place-items-center bg-[#d8f1ee]"><div className="rounded-2xl bg-white/90 px-5 py-4 text-sm font-black text-river shadow-soft">正在请求高德道路规划…</div></div>}{failed && <div role="alert" className="absolute left-4 right-4 top-20 z-30 rounded-2xl border border-red-200 bg-white/95 p-4 shadow-xl backdrop-blur"><div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500"/><div className="min-w-0 flex-1"><strong className="block text-sm text-red-700">道路规划失败，当前仅为点位连线</strong><p className="mt-1 text-xs font-bold leading-5 text-ink/55">{message}；仅为点位连线，不代表真实道路。</p></div><button type="button" onClick={() => { resetAmapJsApiLoader(); setRetryVersion((value) => value + 1); }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white"><RefreshCw className="h-3.5 w-3.5"/>重新规划</button></div></div>}</div>
       {!mapOnly&&<aside className="bg-[#fbfaf5] p-5">{selected&&<><div className="text-xs font-black tracking-[.16em] text-tower">STOP {route.points.findIndex(p=>p.id===selected.id)+1}</div><h4 className="mt-2 font-display text-3xl font-black">{selected.name}</h4><div className="mt-2 flex gap-2 text-xs font-bold text-ink/50"><span>{getPointTypeLabel(selected.type)}</span><span>·</span><span>{selected.time}</span><span>·</span><span>{selected.stayMinutes} 分钟</span></div><p className="mt-5 leading-7 text-ink/68">{selected.reason}</p><div className="mt-4 rounded-xl border-l-4 border-tower bg-white p-4 text-sm leading-6"><b>拍照：</b>{selected.photoTip}</div><div className="mt-3 rounded-xl bg-river/5 p-4 text-sm leading-6"><b>手账：</b>{selected.recordTip}</div></>}</aside>}
     </div>
   </section>;
@@ -223,16 +264,36 @@ function addRoadPolyline(AMap: any, map: any, path: any[]) {
   return overlays;
 }
 
-function addTransportPolylines(AMap: any, map: any, legs: Array<{ mode: TransitLegMode; polyline: Array<[number, number]> }>) {
+function addTransportPolylines(AMap: any, map: any, segments: TransportSegment[]) {
   const colors: Record<TransitLegMode, string> = { walk: '#6b7280', bus: '#0e6b72', subway: '#c94f3d', railway: '#7c3aed', taxi: '#d97706', shuttle: '#12a885' };
   const overlays: any[] = [];
-  for (const [index, leg] of legs.entries()) {
-    const outline = new AMap.Polyline({ path: leg.polyline, strokeColor: '#ffffff', strokeWeight: 11, strokeOpacity: 0.9, lineJoin: 'round', lineCap: 'round', zIndex: 45 + index * 2 });
-    const line = new AMap.Polyline({ path: leg.polyline, strokeColor: colors[leg.mode], strokeWeight: leg.mode === 'walk' ? 5 : 7, strokeOpacity: 0.96, strokeStyle: leg.mode === 'walk' ? 'dashed' : 'solid', strokeDasharray: leg.mode === 'walk' ? [8, 8] : undefined, showDir: leg.mode !== 'subway', lineJoin: 'round', lineCap: 'round', zIndex: 46 + index * 2 });
-    overlays.push(outline, line);
+  const groups: Record<string, TransportOverlayEntry[]> = {};
+  let overlayIndex = 0;
+  for (const segment of segments) {
+    groups[segment.id] = [];
+    for (const leg of segment.legs.filter((item) => item.polyline.length > 1)) {
+      const weight = leg.mode === 'walk' ? 5 : 7;
+      const outline = new AMap.Polyline({ path: leg.polyline, strokeColor: '#ffffff', strokeWeight: weight + 4, strokeOpacity: 0.9, lineJoin: 'round', lineCap: 'round', zIndex: 45 + overlayIndex * 2 });
+      const line = new AMap.Polyline({ path: leg.polyline, strokeColor: colors[leg.mode], strokeWeight: weight, strokeOpacity: 0.96, strokeStyle: leg.mode === 'walk' ? 'dashed' : 'solid', strokeDasharray: leg.mode === 'walk' ? [8, 8] : undefined, showDir: leg.mode !== 'subway', lineJoin: 'round', lineCap: 'round', zIndex: 46 + overlayIndex * 2 });
+      groups[segment.id].push({ outline, line, color: colors[leg.mode], weight });
+      overlays.push(outline, line);
+      overlayIndex += 1;
+    }
   }
   map.add(overlays);
-  return overlays;
+  return { overlays, groups };
+}
+
+function addFocusedPolyline(AMap: any, map: any, path: Array<[number, number]>) {
+  const outline = new AMap.Polyline({ path, strokeColor: '#ffffff', strokeWeight: 15, strokeOpacity: 0.96, lineJoin: 'round', lineCap: 'round', zIndex: 88 });
+  const line = new AMap.Polyline({ path, strokeColor: '#f04438', strokeWeight: 10, strokeOpacity: 1, showDir: true, lineJoin: 'round', lineCap: 'round', zIndex: 89 });
+  map.add([outline, line]);
+  return [outline, line];
+}
+
+export function getFocusedTransportPath(plan?: TransportPlanResponse | null, segmentId?: string | null) {
+  if (!plan || !segmentId) return [];
+  return plan.segments.find((segment) => segment.id === segmentId)?.legs.flatMap((leg) => leg.polyline) ?? [];
 }
 
 function MapLegend({ color, label, dashed = false }: { color: string; label: string; dashed?: boolean }) { return <span className="inline-flex items-center gap-1 text-ink/55"><i className={`block h-0.5 w-4 ${dashed ? 'border-t-2 border-dashed' : ''}`} style={dashed ? { borderColor: color } : { backgroundColor: color }} />{label}</span>; }
@@ -266,10 +327,11 @@ function pointColor(type: RoutePoint['type']) {
   return colors[type];
 }
 
-function GaodeRasterRouteMap({ route, roadPath, selectedPointId, onSelectPoint, journalCards = [] }: { route: SmartRoute; roadPath: Array<[number, number]>; selectedPointId?: string; onSelectPoint: (point: RoutePoint) => void; journalCards?: RouteMapJournalCard[] }) {
+function GaodeRasterRouteMap({ route, roadPath, focusPath, focusedTransportSegmentId, selectedPointId, onSelectPoint, journalCards = [] }: { route: SmartRoute; roadPath: Array<[number, number]>; focusPath: Array<[number, number]>; focusedTransportSegmentId?: string | null; selectedPointId?: string; onSelectPoint: (point: RoutePoint) => void; journalCards?: RouteMapJournalCard[] }) {
   const points = route.points;
-  const zoom = 12;
-  const bounds = getPointBounds(points);
+  const focusCoordinates = focusPath.length > 1 ? focusPath : points.map((point) => [point.lng, point.lat] as [number, number]);
+  const bounds = getCoordinateBounds(focusCoordinates);
+  const zoom = focusPath.length > 1 ? rasterZoomForBounds(bounds) : 12;
   const center = {
     lng: (bounds.minLng + bounds.maxLng) / 2,
     lat: (bounds.minLat + bounds.maxLat) / 2,
@@ -284,6 +346,10 @@ function GaodeRasterRouteMap({ route, roadPath, selectedPointId, onSelectPoint, 
     };
   });
   const projectedRoad = roadPath.map(([lng, lat]) => {
+    const world = lngLatToWorld(lng, lat, zoom);
+    return { x: world.x - centerWorld.x + 500, y: world.y - centerWorld.y + 350 };
+  });
+  const projectedFocus = focusPath.map(([lng, lat]) => {
     const world = lngLatToWorld(lng, lat, zoom);
     return { x: world.x - centerWorld.x + 500, y: world.y - centerWorld.y + 350 };
   });
@@ -319,6 +385,7 @@ function GaodeRasterRouteMap({ route, roadPath, selectedPointId, onSelectPoint, 
         <svg viewBox="0 0 1000 700" className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
           <polyline points={displayedLine.map(({ x, y }) => `${x},${y}`).join(' ')} fill="none" stroke="#ffffff" strokeWidth="10" strokeOpacity=".86" strokeLinecap="round" strokeLinejoin="round" />
           <polyline points={displayedLine.map(({ x, y }) => `${x},${y}`).join(' ')} fill="none" stroke={hasRealRoad ? '#0e6b72' : '#dc4b3e'} strokeWidth="5" strokeOpacity=".9" strokeDasharray={hasRealRoad ? undefined : '12 12'} strokeLinecap="round" strokeLinejoin="round" />
+          {projectedFocus.length > 1 && <><polyline points={projectedFocus.map(({ x, y }) => `${x},${y}`).join(' ')} fill="none" stroke="#ffffff" strokeWidth="15" strokeOpacity=".95" strokeLinecap="round" strokeLinejoin="round" /><polyline points={projectedFocus.map(({ x, y }) => `${x},${y}`).join(' ')} fill="none" stroke="#f04438" strokeWidth="9" strokeOpacity="1" strokeLinecap="round" strokeLinejoin="round" /></>}
         </svg>
         {projected.map(({ point, x, y }, index) => {
           const active = point.id === selectedPointId;
@@ -346,7 +413,7 @@ function GaodeRasterRouteMap({ route, roadPath, selectedPointId, onSelectPoint, 
       </div>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-white/55 to-transparent" />
       <div className="absolute bottom-3 left-3 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black text-ink/60 shadow-sm">高德瓦片底图 · AutoNavi</div>
-      <div className={`absolute bottom-3 right-3 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black shadow-sm ${hasRealRoad ? 'text-river' : 'text-red-600'}`}>{hasRealRoad ? '高德后端动态道路规划' : '仅为点位连线，不代表真实道路'}</div>
+      <div className={`absolute bottom-3 right-3 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black shadow-sm ${focusedTransportSegmentId ? 'text-tower' : hasRealRoad ? 'text-river' : 'text-red-600'}`}>{focusedTransportSegmentId ? '当前交通段已放大高亮' : hasRealRoad ? '高德后端动态道路规划' : '仅为点位连线，不代表真实道路'}</div>
     </div>
   );
 }
@@ -410,13 +477,23 @@ function FallbackRouteMap({ route, selectedPointId, onSelectPoint }: { route: Sm
   );
 }
 
-function getPointBounds(points: RoutePoint[]) {
-  return points.reduce((bounds, point) => ({
-    minLng: Math.min(bounds.minLng, point.lng),
-    maxLng: Math.max(bounds.maxLng, point.lng),
-    minLat: Math.min(bounds.minLat, point.lat),
-    maxLat: Math.max(bounds.maxLat, point.lat),
-  }), { minLng: points[0]?.lng ?? 111, maxLng: points[0]?.lng ?? 111, minLat: points[0]?.lat ?? 30, maxLat: points[0]?.lat ?? 30 });
+function getCoordinateBounds(points: Array<[number, number]>) {
+  return points.reduce((bounds, [lng, lat]) => ({
+    minLng: Math.min(bounds.minLng, lng),
+    maxLng: Math.max(bounds.maxLng, lng),
+    minLat: Math.min(bounds.minLat, lat),
+    maxLat: Math.max(bounds.maxLat, lat),
+  }), { minLng: points[0]?.[0] ?? 111, maxLng: points[0]?.[0] ?? 111, minLat: points[0]?.[1] ?? 30, maxLat: points[0]?.[1] ?? 30 });
+}
+
+function rasterZoomForBounds(bounds: ReturnType<typeof getCoordinateBounds>) {
+  const span = Math.max(bounds.maxLng - bounds.minLng, (bounds.maxLat - bounds.minLat) * 1.3);
+  if (span <= 0.012) return 15;
+  if (span <= 0.035) return 14;
+  if (span <= 0.09) return 13;
+  if (span <= 0.22) return 12;
+  if (span <= 0.55) return 11;
+  return 10;
 }
 
 function lngLatToWorld(lng: number, lat: number, zoom: number) {
