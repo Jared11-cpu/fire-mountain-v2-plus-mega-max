@@ -1,12 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { buildJournalMapRoute, buildJournalPosterSvg, layoutJournalPosterPoints } from './JournalPage';
+import { buildCompletedJournalEntries, buildJournalMapRoute, buildJournalPosterSvg, layoutJournalPosterPoints } from './JournalPage';
 import type { JournalEntry } from '../types/route';
+import { defaultTripRequest, generateTripPlan } from '../domain/trip';
 
 function entry(id: string, pointName: string, lng = 114.3055, lat = 30.5928): JournalEntry {
   return { id, pointId: id, pointName, city: '武汉', day: 1, note: '今天的江风很好。', visitedAt: '2026-07-14', lat, lng, photoIds: [] };
 }
 
 describe('journal handwritten route poster', () => {
+  it('shows only completed AI itinerary points at their own route coordinates', () => {
+    const plan = generateTripPlan(defaultTripRequest('武汉'));
+    const [first, second, incomplete] = plan.route.points;
+    plan.dailyRecords = plan.dailyRecords.map((record) => record.day === 1 ? { ...record, checkedPointIds: [first.id, second.id] } : record);
+    const stored = [entry('manual', second.name), entry('unrelated', incomplete.name)];
+
+    const synced = buildCompletedJournalEntries(stored, plan);
+
+    expect(synced.map((item) => item.pointId)).toEqual([first.id, second.id]);
+    expect(synced[1]).toMatchObject({ id: 'manual', pointName: second.name, lat: second.lat, lng: second.lng });
+    expect(new Set(synced.map((item) => `${item.lng},${item.lat}`)).size).toBe(2);
+  });
+
   it('turns real journal entries into an AMap route with ordered markers and notes', () => {
     const route = buildJournalMapRoute([entry('1', '武汉站', 114.4244, 30.6072), entry('2', '昙华林', 114.302, 30.552)], undefined, 'real');
 

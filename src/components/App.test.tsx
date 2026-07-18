@@ -16,7 +16,7 @@ describe('routes and accessibility', () => {
     const journal = renderRoute('/journal');
     expect(screen.getByRole('heading', { name: '我的旅行路线手账' })).toBeInTheDocument();
     expect(screen.getByRole('main', { name: '旅行手账地图' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '记下这一刻' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '记录行程景点' })).toBeInTheDocument();
     journal.unmount();
     renderRoute('/about');
     expect(screen.getByRole('heading', { name: '系统架构图' })).toBeInTheDocument();

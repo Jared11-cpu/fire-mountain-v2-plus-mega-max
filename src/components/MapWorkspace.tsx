@@ -298,6 +298,7 @@ function DailyTaskEditor({ point, record, entry, entries, onBack, onPatch, onEnt
           ...value,
           route: { ...value.route, points: updatedPoints },
           settings: { ...value.settings, targetDurationMinutes: updatedPoints.reduce((sum, item) => sum + item.durationMinutes + item.travelMinutesToNext, 0) },
+          dailyRecords: value.dailyRecords.map((item) => item.day === record.day && !item.checkedPointIds.includes(point.id) ? { ...item, checkedPointIds: [...item.checkedPointIds, point.id] } : item),
         };
       });
       const nextEntry: JournalEntry = {
@@ -324,7 +325,7 @@ function DailyTaskEditor({ point, record, entry, entries, onBack, onPatch, onEnt
         <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-river/35 bg-river/[.04] px-4 py-4 font-black text-river"><ImagePlus className="h-5 w-5" />插入照片<input type="file" accept="image/*" multiple className="sr-only" onChange={(event) => { chooseFiles(event.target.files); event.currentTarget.value = ''; }} /></label>
         {(entry?.photoIds.length ?? 0) > 0 && <p className="text-xs font-bold text-jade">旅行手账中已有 {entry?.photoIds.length} 张照片，本次保存将继续追加。</p>}
         {previews.length > 0 && <div className="grid grid-cols-3 gap-2">{previews.map((url, index) => <div key={url} className="relative"><img src={url} alt={`待保存照片${index + 1}`} className="aspect-square w-full rounded-xl object-cover" /><button type="button" aria-label={`删除待保存照片${index + 1}`} onClick={() => setFiles((items) => items.filter((_, itemIndex) => itemIndex !== index))} className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-ink/80 text-xs font-black text-white">×</button></div>)}</div>}
-        <p className="rounded-2xl bg-ink/[.04] p-3 text-xs font-bold leading-5 text-ink/50">文字记录保存在应用状态，照片压缩后写入本机 IndexedDB；保存后会出现在“旅行手账”的真实足迹中。</p>
+        <p className="rounded-2xl bg-ink/[.04] p-3 text-xs font-bold leading-5 text-ink/50">文字记录保存在应用状态，照片压缩后写入本机 IndexedDB；保存后会出现在“旅行手账”的已完成景点中。</p>
         {error && <p role="alert" className="rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p>}
         <button type="button" disabled={saving} onClick={save} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-5 py-4 text-base font-black text-white disabled:opacity-60">{saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Check className="h-5 w-5" />}{saving ? '正在保存照片…' : '保存并同步到旅行手账'}</button>
       </div>

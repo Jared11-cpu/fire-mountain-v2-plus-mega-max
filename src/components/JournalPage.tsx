@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, BookOpen, Camera, Download, ImagePlus, Loader2, MapPin, Pencil, Route as RouteIcon, Save, Trash2, UploadCloud, X } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { cities, type CityName } from '../data/mockData';
-import { parseLocalDate } from '../domain/trip';
+import { parseLocalDate, type TripPlan } from '../domain/trip';
 import { clearJournal, compressPhoto, deletePhoto, loadPhoto, savePhoto } from '../services/journalStorage';
 import { useTrip } from '../state/tripStore';
 import type { JournalEntry, RoutePoint, SmartRoute } from '../types/route';
@@ -16,10 +16,41 @@ const cityCoordinates: Record<CityName, [number, number]> = {
   荆州: [112.2397, 30.3352], 襄阳: [112.1224, 32.009], 黄石: [115.0389, 30.1995],
 };
 
+export function buildCompletedJournalEntries(entries: JournalEntry[], plan: TripPlan | null): JournalEntry[] {
+  if (!plan) return entries;
+  const completedPointIds = new Set(plan.dailyRecords.flatMap((record) => record.checkedPointIds));
+  return plan.route.points.filter((point) => completedPointIds.has(point.id)).map((point) => {
+    const existing = entries.find((entry) => entry.pointId === point.id)
+      ?? entries.find((entry) => entry.pointName.trim() === point.name.trim());
+    const day = point.day ?? 1;
+    const record = plan.dailyRecords.find((item) => item.day === day);
+    return {
+      id: existing?.id ?? `itinerary-${point.id}`,
+      pointId: point.id,
+      pointName: point.name,
+      city: point.city,
+      day,
+      note: existing?.note || record?.note || '',
+      visitedAt: record?.date ?? plan.requestSnapshot.startDate,
+      lat: point.lat,
+      lng: point.lng,
+      photoIds: existing?.photoIds ?? [],
+    };
+  });
+}
+
+function mergeCompletedJournalEntries(entries: JournalEntry[], plan: TripPlan) {
+  const synced = buildCompletedJournalEntries(entries, plan);
+  const completedPointIds = new Set(synced.map((entry) => entry.pointId));
+  const completedNames = new Set(synced.map((entry) => entry.pointName.trim()));
+  const unrelated = entries.filter((entry) => !completedPointIds.has(entry.pointId) && !completedNames.has(entry.pointName.trim()));
+  return [...synced, ...unrelated];
+}
+
 export function JournalPage() {
   const { entryId } = useParams();
   const navigate = useNavigate();
-  const { journalEntries: entries, setJournalEntries, plan, notify } = useTrip();
+  const { journalEntries: entries, setJournalEntries, plan, patchPlan, notify } = useTrip();
   const [mode, setMode] = useState<'real' | 'example'>('real');
   const [draft, setDraft] = useState({ pointName: '', note: '', city: '武汉' as CityName, visitedAt: new Date().toISOString().slice(0, 10) });
   const [pending, setPending] = useState<PendingPhoto[]>([]);
@@ -48,9 +79,16 @@ export function JournalPage() {
     return () => { alive = false; };
   }, [entries, notify]);
 
-  const stats = useMemo(() => ({ places: new Set(entries.map((entry) => entry.pointName)).size, cities: new Set(entries.map((entry) => entry.city)).size, photos: entries.reduce((sum, entry) => sum + entry.photoIds.length, 0) }), [entries]);
+  const completedEntries = useMemo(() => buildCompletedJournalEntries(entries, plan), [entries, plan]);
+  useEffect(() => {
+    if (!plan) return;
+    const merged = mergeCompletedJournalEntries(entries, plan);
+    if (JSON.stringify(merged) !== JSON.stringify(entries)) setJournalEntries(merged);
+  }, [entries, plan, setJournalEntries]);
+
+  const stats = useMemo(() => ({ places: new Set(completedEntries.map((entry) => entry.pointName)).size, cities: new Set(completedEntries.map((entry) => entry.city)).size, photos: completedEntries.reduce((sum, entry) => sum + entry.photoIds.length, 0) }), [completedEntries]);
   const examplePoints = plan?.route.points ?? [];
-  const realMapEntries: JournalMapEntry[] = entries.map((entry) => ({ ...entry, photoUrl: entry.photoIds.map((id) => photoUrls[id]).find(Boolean) }));
+  const realMapEntries: JournalMapEntry[] = completedEntries.map((entry) => ({ ...entry, photoUrl: entry.photoIds.map((id) => photoUrls[id]).find(Boolean) }));
   const exampleMapEntries: JournalMapEntry[] = examplePoints.map((point) => ({ id: `example-${point.id}`, pointId: point.id, pointName: point.name, city: point.city, day: point.day ?? 1, note: point.recordTip, visitedAt: plan?.requestSnapshot.startDate ?? new Date().toISOString().slice(0, 10), lat: point.lat, lng: point.lng, photoIds: [], photoUrl: point.imageUrl, isExample: true }));
   const visibleEntries = mode === 'real' ? realMapEntries : exampleMapEntries;
 
@@ -83,6 +121,7 @@ export function JournalPage() {
       const matchedPoint = plan?.route.points.find((point) => point.name === draft.pointName.trim());
       const [fallbackLng, fallbackLat] = cityCoordinates[draft.city];
       const entry: JournalEntry = { id: crypto.randomUUID(), pointId: matchedPoint?.id ?? `real-${crypto.randomUUID()}`, pointName: draft.pointName.trim(), city: draft.city, day: matchedPoint?.day ?? 1, note: draft.note.trim(), visitedAt: draft.visitedAt, lat: matchedPoint?.lat ?? fallbackLat, lng: matchedPoint?.lng ?? fallbackLng, photoIds: savedIds };
+      if (matchedPoint) patchPlan((value) => ({ ...value, dailyRecords: value.dailyRecords.map((record) => record.day === (matchedPoint.day ?? 1) && !record.checkedPointIds.includes(matchedPoint.id) ? { ...record, checkedPointIds: [...record.checkedPointIds, matchedPoint.id] } : record) }));
       setJournalEntries([entry, ...entries]);
       pending.forEach((item) => URL.revokeObjectURL(item.preview));
       setPending([]); setDraft((value) => ({ ...value, pointName: '', note: '' })); setMode('real');
@@ -100,8 +139,8 @@ export function JournalPage() {
   };
 
   const clearAll = async () => {
-    if (!window.confirm('清空全部真实足迹和照片？此操作无法撤销。')) return;
-    try { await clearJournal(entries); setJournalEntries([]); notify('真实足迹已清空。', 'success'); }
+    if (!window.confirm('清空全部已完成景点和照片？此操作无法撤销。')) return;
+    try { await clearJournal(entries); patchPlan((value) => ({ ...value, dailyRecords: value.dailyRecords.map((record) => ({ ...record, checkedPointIds: [] })) })); setJournalEntries([]); notify('已完成景点与旅行记录已清空。', 'success'); }
     catch (error) { console.error('Journal clear failed', error); notify('清空失败，请重试。', 'error'); }
   };
 
@@ -125,11 +164,11 @@ export function JournalPage() {
     <section className="pointer-events-none absolute left-4 right-4 top-4 z-50 flex items-start justify-between gap-4">
       <div className="pointer-events-auto max-w-[min(640px,calc(100vw-2rem))] rounded-[1.4rem] border border-white/65 bg-white/88 p-3 shadow-[0_18px_55px_rgba(18,34,42,.2)] backdrop-blur-xl md:p-4">
         <div className="flex flex-wrap items-center gap-3"><div><div className="flex items-center gap-2 text-[10px] font-black tracking-[.2em] text-river"><RouteIcon className="h-4 w-4"/>MY HUBEI ROUTE</div><h1 className="journal-handwriting mt-1 text-2xl font-black md:text-3xl">我的旅行路线手账</h1></div><div className="ml-auto hidden grid-cols-3 gap-1.5 sm:grid">{[['地点', stats.places], ['城市', stats.cities], ['照片', stats.photos]].map(([label, value]) => <div key={label} className="min-w-14 rounded-xl bg-ink/[.05] px-2 py-1.5 text-center"><b className="block text-sm">{value}</b><span className="text-[9px] font-bold text-ink/45">{label}</span></div>)}</div></div>
-        <div className="mt-3 flex flex-wrap items-center gap-2"><div className="flex rounded-full bg-ink/[.06] p-1" role="tablist">{(['real', 'example'] as const).map((item) => <button key={item} type="button" role="tab" aria-selected={mode === item} onClick={() => setMode(item)} className={`rounded-full px-3 py-2 text-[11px] font-black transition ${mode === item ? 'bg-ink text-white shadow-sm' : 'text-ink/55'}`}>{item === 'real' ? `真实足迹 ${entries.length}` : `示例路线 ${examplePoints.length}`}</button>)}</div><button type="button" onClick={() => setShowComposer(true)} className="inline-flex items-center gap-1.5 rounded-full bg-river px-3 py-2 text-[11px] font-black text-white"><BookOpen className="h-3.5 w-3.5"/>记下这一刻</button><button type="button" disabled={visibleEntries.length === 0 || exportingPoster} onClick={savePoster} className="inline-flex items-center gap-1.5 rounded-full bg-tower px-3 py-2 text-[11px] font-black text-white disabled:opacity-40"><Download className="h-3.5 w-3.5"/>{exportingPoster ? '正在绘制…' : '保存海报'}</button>{entries.length > 0 && mode === 'real' && <button type="button" onClick={clearAll} className="rounded-full px-3 py-2 text-[11px] font-black text-red-600">清空记录</button>}</div>
+        <div className="mt-3 flex flex-wrap items-center gap-2"><div className="flex rounded-full bg-ink/[.06] p-1" role="tablist">{(['real', 'example'] as const).map((item) => <button key={item} type="button" role="tab" aria-selected={mode === item} onClick={() => setMode(item)} className={`rounded-full px-3 py-2 text-[11px] font-black transition ${mode === item ? 'bg-ink text-white shadow-sm' : 'text-ink/55'}`}>{item === 'real' ? `已完成景点 ${completedEntries.length}` : `完整行程 ${examplePoints.length}`}</button>)}</div><button type="button" onClick={() => setShowComposer(true)} className="inline-flex items-center gap-1.5 rounded-full bg-river px-3 py-2 text-[11px] font-black text-white"><BookOpen className="h-3.5 w-3.5"/>记录行程景点</button><button type="button" disabled={visibleEntries.length === 0 || exportingPoster} onClick={savePoster} className="inline-flex items-center gap-1.5 rounded-full bg-tower px-3 py-2 text-[11px] font-black text-white disabled:opacity-40"><Download className="h-3.5 w-3.5"/>{exportingPoster ? '正在绘制…' : '保存海报'}</button>{completedEntries.length > 0 && mode === 'real' && <button type="button" onClick={clearAll} className="rounded-full px-3 py-2 text-[11px] font-black text-red-600">清空记录</button>}</div>
       </div>
     </section>
 
-    {showComposer && <aside aria-label="新增旅行记录" className="absolute bottom-4 right-4 top-4 z-[60] w-[min(390px,calc(100vw-2rem))] overflow-y-auto rounded-[1.6rem] border border-white/70 bg-[#fffdf7]/94 p-5 shadow-[0_28px_80px_rgba(18,34,42,.28)] backdrop-blur-xl"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><BookOpen className="h-5 w-5 text-tower"/><h2 className="font-display text-2xl font-black">记下这一刻</h2></div><button type="button" aria-label="关闭新增手账" onClick={() => setShowComposer(false)} className="grid h-9 w-9 place-items-center rounded-full bg-ink/5"><X className="h-4 w-4"/></button></div><div className="mt-5 grid gap-4"><Field label="地点 *" htmlFor="journal-place"><input id="journal-place" value={draft.pointName} onChange={(event) => setDraft({ ...draft, pointName: event.target.value })} placeholder="例如：黄鹤楼" className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3" /></Field><Field label="日期 *" htmlFor="journal-date"><input id="journal-date" type="date" value={draft.visitedAt} onChange={(event) => setDraft({ ...draft, visitedAt: event.target.value })} className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3" /></Field><Field label="城市" htmlFor="journal-city"><select id="journal-city" value={draft.city} onChange={(event) => setDraft({ ...draft, city: event.target.value as CityName })} className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3">{cities.map((city) => <option key={city.name}>{city.name}</option>)}</select></Field><Field label="手账心得" htmlFor="journal-note"><textarea id="journal-note" rows={5} value={draft.note} placeholder="当时看见了什么、听见了什么？" onChange={(event) => setDraft({ ...draft, note: event.target.value })} className="journal-handwriting focus-ring w-full resize-none rounded-2xl border border-ink/10 bg-white px-4 py-3 text-lg leading-7" /></Field></div>
+    {showComposer && <aside aria-label="新增旅行记录" className="absolute bottom-4 right-4 top-4 z-[60] w-[min(390px,calc(100vw-2rem))] overflow-y-auto rounded-[1.6rem] border border-white/70 bg-[#fffdf7]/94 p-5 shadow-[0_28px_80px_rgba(18,34,42,.28)] backdrop-blur-xl"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><BookOpen className="h-5 w-5 text-tower"/><h2 className="font-display text-2xl font-black">记录行程景点</h2></div><button type="button" aria-label="关闭新增手账" onClick={() => setShowComposer(false)} className="grid h-9 w-9 place-items-center rounded-full bg-ink/5"><X className="h-4 w-4"/></button></div><p className="mt-3 rounded-2xl bg-river/[.06] px-3 py-2 text-xs font-bold leading-5 text-river">选择 AI 行程中的实际景点，保存后会自动标记完成并显示在对应地图位置。</p><div className="mt-5 grid gap-4"><Field label="AI 行程景点 *" htmlFor="journal-place">{plan ? <select id="journal-place" value={draft.pointName} onChange={(event) => { const point = plan.route.points.find((item) => item.name === event.target.value); setDraft({ ...draft, pointName: event.target.value, city: point?.city ?? draft.city }); }} className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3"><option value="">请选择行程景点</option>{plan.route.points.map((point) => <option key={point.id} value={point.name}>{point.name}</option>)}</select> : <input id="journal-place" value={draft.pointName} onChange={(event) => setDraft({ ...draft, pointName: event.target.value })} placeholder="例如：黄鹤楼" className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3" />}</Field><Field label="日期 *" htmlFor="journal-date"><input id="journal-date" type="date" value={draft.visitedAt} onChange={(event) => setDraft({ ...draft, visitedAt: event.target.value })} className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3" /></Field><Field label="城市" htmlFor="journal-city"><select id="journal-city" value={draft.city} disabled={Boolean(plan)} onChange={(event) => setDraft({ ...draft, city: event.target.value as CityName })} className="focus-ring w-full rounded-2xl border border-ink/10 bg-white px-4 py-3 disabled:cursor-not-allowed disabled:bg-ink/[.04]">{cities.map((city) => <option key={city.name}>{city.name}</option>)}</select></Field><Field label="手账心得" htmlFor="journal-note"><textarea id="journal-note" rows={5} value={draft.note} placeholder="当时看见了什么、听见了什么？" onChange={(event) => setDraft({ ...draft, note: event.target.value })} className="journal-handwriting focus-ring w-full resize-none rounded-2xl border border-ink/10 bg-white px-4 py-3 text-lg leading-7" /></Field></div>
       <label className="mt-4 flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-river/40 bg-white/70 px-4 py-4 font-black text-river"><ImagePlus className="h-5 w-5" />选择照片<input type="file" accept="image/*" multiple className="sr-only" onChange={(event) => { chooseFiles(event.target.files); event.currentTarget.value = ''; }} /></label>
       {pending.length > 0 && <div className="mt-4 grid grid-cols-2 gap-3">{pending.map((photo) => <div key={photo.id} className="relative overflow-hidden rounded-2xl bg-white p-2 shadow-sm"><img src={photo.preview} alt="待上传预览" className="aspect-square w-full rounded-xl object-cover" /><button type="button" aria-label="删除待上传照片" onClick={() => removePending(photo.id)} className="absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-full bg-black/65 text-white"><X className="h-4 w-4" /></button><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink/10"><div className="h-full bg-jade" style={{ width: `${photo.progress}%` }} /></div></div>)}</div>}
       {formError && <p className="mt-4 rounded-2xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{formError}</p>}<button type="button" disabled={saving} onClick={saveRecord} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-5 py-4 font-black text-white disabled:opacity-60">{saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <UploadCloud className="h-5 w-5" />}{saving ? '保存中…' : '保存这一页'}</button>
@@ -144,7 +183,7 @@ function JournalRouteMap({ entries, mode, sourceRoute, onOpen }: { entries: Jour
   useEffect(() => { setSelectedId(orderedEntries[0]?.id); }, [mode, orderedEntries[0]?.id]);
   const selectedIndex = Math.max(0, route?.points.findIndex((point) => point.id === selectedId) ?? 0);
 
-  if (!route) return <div className="grid h-full min-h-[690px] place-items-center bg-[#e3eee9]"><div className="rounded-3xl bg-white/90 px-8 py-7 text-center text-ink/45 shadow-xl backdrop-blur"><MapPin className="mx-auto h-10 w-10 text-river/45" /><p className="mt-3 font-black">{mode === 'real' ? '还没有真实记录，点击“记下这一刻”添加第一站。' : '请先生成一条示例路线。'}</p></div></div>;
+  if (!route) return <div className="grid h-full min-h-[690px] place-items-center bg-[#e3eee9]"><div className="rounded-3xl bg-white/90 px-8 py-7 text-center text-ink/45 shadow-xl backdrop-blur"><MapPin className="mx-auto h-10 w-10 text-river/45" /><p className="mt-3 font-black">{mode === 'real' ? '还没有已完成景点，请先在 AI 行程的“每日记录”中完成一站。' : '请先生成一条行程路线。'}</p></div></div>;
 
   return <div className="relative h-full min-h-[690px] overflow-hidden bg-white">
     <RouteMap route={route} selectedPointId={selectedId} activePointIndex={selectedIndex} navigating={false} journalCards={orderedEntries.map(({ id, note, photoUrl }) => ({ id, note, photoUrl }))} onSelectPoint={(point) => { setSelectedId(point.id); if (mode === 'real') onOpen(point.id); }} mapOnly />
@@ -233,7 +272,7 @@ export function buildJournalPosterSvg(entries: JournalMapEntry[], mode: 'real' |
   const dates = entries.map((entry) => entry.visitedAt).filter(Boolean).sort();
   const lastDate = dates[dates.length - 1];
   const dateText = dates.length ? dates[0] === lastDate ? dates[0] : `${dates[0]} — ${lastDate}` : new Date().toISOString().slice(0, 10);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="1754" viewBox="0 0 1240 1754"><defs><pattern id="grid" width="42" height="42" patternUnits="userSpaceOnUse"><path d="M42 0H0V42" fill="none" stroke="#0e6b72" stroke-opacity=".045" stroke-width="1"/></pattern><filter id="rough"><feTurbulence type="fractalNoise" baseFrequency=".008" numOctaves="2" seed="7" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="2"/></filter></defs><rect width="1240" height="1754" fill="#f7f1e4"/><rect x="38" y="38" width="1164" height="1678" rx="38" fill="#fffaf0" stroke="#1c2f38" stroke-opacity=".14" stroke-width="3"/><rect x="38" y="38" width="1164" height="1678" rx="38" fill="url(#grid)"/><text x="86" y="112" fill="#0e6b72" font-size="20" font-weight="900" letter-spacing="8">MY HUBEI ROUTE</text><text x="86" y="186" fill="#1c2f38" font-size="58" font-weight="900" font-family="KaiTi, STKaiti, serif">我的旅行路线手账</text><text x="88" y="230" fill="#1c2f38" fill-opacity=".55" font-size="19">${escapeSvg(mode === 'real' ? '真实足迹' : '示例路线')} · ${entries.length} 站 · ${escapeSvg(citiesText)}</text><text x="1154" y="112" text-anchor="end" fill="#1c2f38" fill-opacity=".45" font-size="18">${escapeSvg(dateText)}</text><g transform="translate(0 245) scale(1.55)"><path d="${HUBEI_OUTLINE_PATH}" fill="#dceee5" stroke="#0e6b72" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" filter="url(#rough)"/><path d="M155 292 C235 278 296 308 359 292 C430 274 512 314 650 277" fill="none" stroke="#63aeb8" stroke-width="8" stroke-opacity=".55" stroke-linecap="round"/>${points.length > 1 ? `<polyline points="${route}" fill="none" stroke="#fffaf0" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/><polyline points="${route}" fill="none" stroke="#c94f3d" stroke-width="6" stroke-dasharray="13 11" stroke-linecap="round" stroke-linejoin="round"/>` : ''}${markers}</g><text x="1154" y="976" text-anchor="end" fill="#1c2f38" fill-opacity=".4" font-size="17">湖北轮廓示意 · 足迹按记录顺序连接 · 非导航地图</text>${cards}<path d="M88 1630 Q284 1598 454 1632 T824 1620 T1150 1610" fill="none" stroke="#c94f3d" stroke-opacity=".45" stroke-width="3"/><text x="88" y="1677" fill="#1c2f38" fill-opacity=".56" font-size="25" font-family="KaiTi, STKaiti, serif">走过的地方，会在纸上重新相遇。</text><text x="1152" y="1677" text-anchor="end" fill="#0e6b72" font-size="18" font-weight="800">楚游智导 · 旅行手账</text></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="1754" viewBox="0 0 1240 1754"><defs><pattern id="grid" width="42" height="42" patternUnits="userSpaceOnUse"><path d="M42 0H0V42" fill="none" stroke="#0e6b72" stroke-opacity=".045" stroke-width="1"/></pattern><filter id="rough"><feTurbulence type="fractalNoise" baseFrequency=".008" numOctaves="2" seed="7" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="2"/></filter></defs><rect width="1240" height="1754" fill="#f7f1e4"/><rect x="38" y="38" width="1164" height="1678" rx="38" fill="#fffaf0" stroke="#1c2f38" stroke-opacity=".14" stroke-width="3"/><rect x="38" y="38" width="1164" height="1678" rx="38" fill="url(#grid)"/><text x="86" y="112" fill="#0e6b72" font-size="20" font-weight="900" letter-spacing="8">MY HUBEI ROUTE</text><text x="86" y="186" fill="#1c2f38" font-size="58" font-weight="900" font-family="KaiTi, STKaiti, serif">我的旅行路线手账</text><text x="88" y="230" fill="#1c2f38" fill-opacity=".55" font-size="19">${escapeSvg(mode === 'real' ? '已完成景点' : '完整行程')} · ${entries.length} 站 · ${escapeSvg(citiesText)}</text><text x="1154" y="112" text-anchor="end" fill="#1c2f38" fill-opacity=".45" font-size="18">${escapeSvg(dateText)}</text><g transform="translate(0 245) scale(1.55)"><path d="${HUBEI_OUTLINE_PATH}" fill="#dceee5" stroke="#0e6b72" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" filter="url(#rough)"/><path d="M155 292 C235 278 296 308 359 292 C430 274 512 314 650 277" fill="none" stroke="#63aeb8" stroke-width="8" stroke-opacity=".55" stroke-linecap="round"/>${points.length > 1 ? `<polyline points="${route}" fill="none" stroke="#fffaf0" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/><polyline points="${route}" fill="none" stroke="#c94f3d" stroke-width="6" stroke-dasharray="13 11" stroke-linecap="round" stroke-linejoin="round"/>` : ''}${markers}</g><text x="1154" y="976" text-anchor="end" fill="#1c2f38" fill-opacity=".4" font-size="17">湖北轮廓示意 · 足迹按记录顺序连接 · 非导航地图</text>${cards}<path d="M88 1630 Q284 1598 454 1632 T824 1620 T1150 1610" fill="none" stroke="#c94f3d" stroke-opacity=".45" stroke-width="3"/><text x="88" y="1677" fill="#1c2f38" fill-opacity=".56" font-size="25" font-family="KaiTi, STKaiti, serif">走过的地方，会在纸上重新相遇。</text><text x="1152" y="1677" text-anchor="end" fill="#0e6b72" font-size="18" font-weight="800">楚游智导 · 旅行手账</text></svg>`;
 }
 
 async function downloadJournalPoster(entries: JournalMapEntry[], mode: 'real' | 'example') {
