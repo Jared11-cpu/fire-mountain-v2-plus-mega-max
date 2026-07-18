@@ -42,6 +42,7 @@ export type TripRequest = {
 export type PlannedRoutePoint = RoutePoint & {
   arrivalTime: string;
   durationMinutes: number;
+  actualDurationMinutes?: number;
   travelMinutesToNext: number;
 };
 

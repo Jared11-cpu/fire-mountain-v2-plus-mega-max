@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { baseRoutes } from '../data/routeData';
 import type { TransportPlanResponse } from '../services/transportService';
-import { compactTravelTip, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointServiceLinks, getVerifiedCtripDetailUrl, isDirectCtripDetailUrl } from './MapWorkspace';
+import { compactTravelTip, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointPrimaryDetailLink, getPointServiceLinks, getVerifiedCtripDetailUrl, isDirectCtripDetailUrl, normalizeActualStayMinutes } from './MapWorkspace';
 import { getFocusedTransportPath } from './RouteMap';
 
 describe('getPointServiceLinks', () => {
@@ -55,6 +55,19 @@ describe('getPointServiceLinks', () => {
     expect(links.amapUrl).toContain('position=114.3,30.5');
   });
 
+  it('always provides a direct primary detail link with AMap as the honest fallback', () => {
+    expect(getPointPrimaryDetailLink({ name: '武汉大学', city: '武汉', type: 'scenic' })).toMatchObject({
+      source: 'ctrip',
+      label: '携程 · 景点详情',
+      url: 'https://you.ctrip.com/sight/145/1493507.html',
+    });
+    expect(getPointPrimaryDetailLink({ name: '临时点位', city: '武汉', type: 'scenic', lat: 30.5, lng: 114.3 })).toMatchObject({
+      source: 'amap',
+      label: '高德 · 地点信息',
+    });
+    expect(getPointPrimaryDetailLink({ name: '临时点位', city: '武汉', type: 'scenic', lat: 30.5, lng: 114.3 }).url).toContain('uri.amap.com/marker');
+  });
+
   it('maps a Three Gorges sub-area to the verified direct Ctrip attraction page', () => {
     expect(getVerifiedCtripDetailUrl({ name: '三峡工程党建文化广场', type: 'scenic' })).toBe('https://you.ctrip.com/sight/yichang313/140201.html');
   });
@@ -78,6 +91,15 @@ describe('getPointServiceLinks', () => {
         expect(links.bookingUrl, `${point.city} / ${point.name}`).toContain(encodeURIComponent(`${point.city} ${point.name}`));
       }
     }
+  });
+});
+
+describe('normalizeActualStayMinutes', () => {
+  it('keeps actual stay entries within a full-day range', () => {
+    expect(normalizeActualStayMinutes(75.4)).toBe(75);
+    expect(normalizeActualStayMinutes(-8)).toBe(0);
+    expect(normalizeActualStayMinutes(1600)).toBe(1440);
+    expect(normalizeActualStayMinutes('')).toBe(0);
   });
 });
 
