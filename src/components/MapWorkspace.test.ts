@@ -134,15 +134,16 @@ describe('getBudgetUsageVisual', () => {
     expect(getBudgetUsageVisual(720, 600)).toMatchObject({ percent: 120, clampedPercent: 100, difference: -120 });
   });
 
-  it('colors the whole card green at zero, yellow near 60%, and red at 100%', () => {
+  it('uses one solid card color: green at zero, yellow at 60%, and red from 80%', () => {
     expect(getBudgetUsageVisual(0, 600).color).toBe('hsl(152 72% 36%)');
     expect(getBudgetUsageVisual(360, 600).color).toBe('hsl(44 82% 48%)');
-    expect(getBudgetUsageVisual(600, 600).color).toBe('hsl(4 76% 46%)');
-    expect(getBudgetUsageVisual(0, 600).background).toContain('hsl(152');
+    expect(getBudgetUsageVisual(480, 600).color).toBe('hsl(4 76% 46%)');
+    expect(getBudgetUsageVisual(600, 600).color).toBe('hsl(2 76% 42%)');
+    expect(getBudgetUsageVisual(0, 600)).not.toHaveProperty('background');
   });
 
   it('deepens the red as spending exceeds the budget', () => {
-    expect(getBudgetUsageVisual(900, 600).color).toBe('hsl(358 77% 35%)');
+    expect(getBudgetUsageVisual(900, 600).color).toBe('hsl(357 77% 33%)');
     expect(getBudgetUsageVisual(1200, 600).color).toBe('hsl(352 78% 24%)');
     expect(getBudgetUsageVisual(1800, 600).color).toBe(getBudgetUsageVisual(1200, 600).color);
   });

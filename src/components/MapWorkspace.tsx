@@ -551,13 +551,13 @@ export function getBudgetUsageVisual(actual: number, planned: number) {
   const colorPercent = Math.min(200, percent);
   const start = colorPercent <= 60
     ? { at: 0, hue: 152, saturation: 72, lightness: 36 }
-    : colorPercent <= 100
+    : colorPercent <= 80
       ? { at: 60, hue: 44, saturation: 82, lightness: 48 }
-      : { at: 100, hue: 4, saturation: 76, lightness: 46 };
+      : { at: 80, hue: 4, saturation: 76, lightness: 46 };
   const end = colorPercent <= 60
     ? { at: 60, hue: 44, saturation: 82, lightness: 48 }
-    : colorPercent <= 100
-      ? { at: 100, hue: 4, saturation: 76, lightness: 46 }
+    : colorPercent <= 80
+      ? { at: 80, hue: 4, saturation: 76, lightness: 46 }
       : { at: 200, hue: -8, saturation: 78, lightness: 24 };
   const progress = (colorPercent - start.at) / Math.max(1, end.at - start.at);
   const hue = Math.round(start.hue + (end.hue - start.hue) * progress);
@@ -565,21 +565,18 @@ export function getBudgetUsageVisual(actual: number, planned: number) {
   const lightness = Math.round(start.lightness + (end.lightness - start.lightness) * progress);
   const normalizedHue = (hue + 360) % 360;
   const color = `hsl(${normalizedHue} ${saturation}% ${lightness}%)`;
-  const lightTone = `hsl(${normalizedHue} ${Math.max(55, saturation - 10)}% ${Math.min(66, lightness + 10)}%)`;
-  const darkTone = `hsl(${normalizedHue} ${Math.min(88, saturation + 5)}% ${Math.max(17, lightness - 9)}%)`;
   return {
     percent,
     clampedPercent,
     difference: planned - actual,
     color,
-    background: `linear-gradient(135deg, ${lightTone} 0%, ${color} 52%, ${darkTone} 100%)`,
   };
 }
 
 function Budget({ items, target, days, onChange }: { items: BudgetItem[]; target: number; days: number; onChange: (items: BudgetItem[]) => void }) {
   const total = budgetTotal(items); const usage = getBudgetUsageVisual(total, target); const remaining = usage.difference;
   const updateItem = (id: string, changes: Partial<BudgetItem>) => onChange(items.map((item) => item.id === id ? { ...item, ...changes } : item));
-  return <div className="space-y-4"><div><h4 className="font-display text-2xl font-black">旅行预算</h4><p className="mt-1 text-xs font-bold text-ink/45">计划预算在概览修改；这里只记录实际支出。</p></div><section aria-label={`实际花费占计划预算 ${usage.percent}%`} className="relative overflow-hidden rounded-[1.9rem] p-5 text-white shadow-[0_22px_54px_rgba(18,34,42,.22)] transition-[background] duration-700 ease-out" style={{ background: usage.background }}><div aria-hidden="true" className="absolute inset-0 bg-[radial-gradient(circle_at_82%_12%,rgba(255,255,255,.18),transparent_34%),linear-gradient(145deg,rgba(255,255,255,.08),transparent_45%,rgba(0,0,0,.12))]" /><div className="relative grid grid-cols-2 gap-5"><BudgetAmount label="计划" value={target} /><BudgetAmount label="实际" value={total} align="right" /></div><div className="relative mt-7 flex items-end justify-between gap-4"><div><strong className="font-display text-[3.25rem] font-black leading-none tracking-[-0.05em]">{usage.percent}%</strong><span className="ml-2 text-xs font-black text-white/70">已花费</span></div><span className="rounded-full border border-white/15 bg-black/10 px-3 py-1.5 text-[10px] font-black backdrop-blur">{remaining >= 0 ? `剩余 ¥${remaining.toLocaleString('zh-CN')}` : `超出 ¥${Math.abs(remaining).toLocaleString('zh-CN')}`}</span></div><div className="relative mt-5 h-1.5 overflow-hidden rounded-full bg-black/20"><div className="h-full rounded-full bg-white/90 shadow-[0_0_14px_rgba(255,255,255,.5)] transition-[width] duration-700" style={{ width: `${usage.clampedPercent}%` }} /></div><div className="relative mt-4 grid grid-cols-3 border-t border-white/15 pt-4"><BudgetFact label="剩余" value={`${remaining < 0 ? '-' : ''}¥${Math.abs(remaining).toLocaleString('zh-CN')}`} tone={remaining < 0 ? 'warn' : 'normal'} /><BudgetFact label="日均" value={`¥${Math.round(target / Math.max(1, days)).toLocaleString('zh-CN')}`} /><BudgetFact label="条目" value={`${items.length} 项`} /></div></section>
+  return <div className="space-y-4"><div><h4 className="font-display text-2xl font-black">旅行预算</h4><p className="mt-1 text-xs font-bold text-ink/45">计划预算在概览修改；这里只记录实际支出。</p></div><section aria-label={`实际花费占计划预算 ${usage.percent}%`} className="relative overflow-hidden rounded-[1.9rem] p-5 text-white shadow-[0_22px_54px_rgba(18,34,42,.22)] transition-[background-color] duration-700 ease-out" style={{ backgroundColor: usage.color }}><div className="grid grid-cols-2 gap-5"><BudgetAmount label="计划" value={target} /><BudgetAmount label="实际" value={total} align="right" /></div><div className="mt-7 flex items-end justify-between gap-4"><div><strong className="font-display text-[3.25rem] font-black leading-none tracking-[-0.05em]">{usage.percent}%</strong><span className="ml-2 text-xs font-black text-white/70">已花费</span></div><span className="rounded-full border border-white/15 bg-black/10 px-3 py-1.5 text-[10px] font-black backdrop-blur">{remaining >= 0 ? `剩余 ¥${remaining.toLocaleString('zh-CN')}` : `超出 ¥${Math.abs(remaining).toLocaleString('zh-CN')}`}</span></div><div className="mt-5 h-1.5 overflow-hidden rounded-full bg-black/20"><div className="h-full rounded-full bg-white/90 shadow-[0_0_14px_rgba(255,255,255,.5)] transition-[width] duration-700" style={{ width: `${usage.clampedPercent}%` }} /></div><div className="mt-4 grid grid-cols-3 border-t border-white/15 pt-4"><BudgetFact label="剩余" value={`${remaining < 0 ? '-' : ''}¥${Math.abs(remaining).toLocaleString('zh-CN')}`} tone={remaining < 0 ? 'warn' : 'normal'} /><BudgetFact label="日均" value={`¥${Math.round(target / Math.max(1, days)).toLocaleString('zh-CN')}`} /><BudgetFact label="条目" value={`${items.length} 项`} /></div></section>
     <div className="flex items-center justify-between"><h5 className="font-display text-lg font-black">实际支出</h5><span className="inline-flex items-center gap-1 text-[10px] font-black text-jade"><span className="h-1.5 w-1.5 rounded-full bg-jade" />自动保存</span></div>{items.map((item, index) => <BudgetRow key={item.id} item={item} index={index} onUpdate={(changes) => updateItem(item.id, changes)} onDelete={() => onChange(items.filter((value) => value.id !== item.id))} />)}<button type="button" onClick={() => onChange([...items, { id: `budget-${crypto.randomUUID()}`, item: '新支出', amount: 0, note: '' }])} className="group inline-flex w-full items-center justify-center gap-2 rounded-[1.4rem] border border-dashed border-river/35 bg-river/[0.035] px-4 py-4 font-black text-river transition hover:border-river hover:bg-river/10"><span className="grid h-7 w-7 place-items-center rounded-full bg-river text-white transition group-hover:rotate-90"><Plus className="h-4 w-4" /></span>新增支出</button></div>;
 }
 
