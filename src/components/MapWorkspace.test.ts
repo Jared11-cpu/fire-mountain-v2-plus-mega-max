@@ -129,9 +129,10 @@ describe('getDianpingShopDetailUrl', () => {
 
 describe('getBudgetUsageVisual', () => {
   it('calculates usage from actual spending divided by the planned budget', () => {
-    expect(getBudgetUsageVisual(150, 600)).toMatchObject({ percent: 25, clampedPercent: 25, difference: 450 });
-    expect(getBudgetUsageVisual(600, 600)).toMatchObject({ percent: 100, clampedPercent: 100, difference: 0 });
-    expect(getBudgetUsageVisual(720, 600)).toMatchObject({ percent: 120, clampedPercent: 100, difference: -120 });
+    expect(getBudgetUsageVisual(150, 600)).toMatchObject({ percent: 25, clampedPercent: 25, fillPercent: 25, difference: 450 });
+    expect(getBudgetUsageVisual(400, 600)).toMatchObject({ percent: 67, fillPercent: 67, difference: 200 });
+    expect(getBudgetUsageVisual(600, 600)).toMatchObject({ percent: 100, clampedPercent: 100, fillPercent: 100, difference: 0 });
+    expect(getBudgetUsageVisual(720, 600)).toMatchObject({ percent: 120, clampedPercent: 100, fillPercent: 100, difference: -120 });
   });
 
   it('uses one solid card color: green at zero, yellow at 60%, and red from 80%', () => {
