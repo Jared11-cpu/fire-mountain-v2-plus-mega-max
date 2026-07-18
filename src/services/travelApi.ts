@@ -1,4 +1,4 @@
-import type { FoodRecommendation, TripPlan, TripRequest } from '../domain/trip';
+import { buildFoodRecommendations, type FoodRecommendation, type TripPlan, type TripRequest } from '../domain/trip';
 import type { RoutePoint } from '../types/route';
 
 export type AiTravelRequest = {
@@ -30,7 +30,7 @@ export async function parseTravelRequestWithAi(text: string): Promise<AiTravelRe
 }
 
 export async function enrichTripPlanWithBackend(plan: TripPlan, request: TripRequest): Promise<{ analysis?: string; foods?: FoodRecommendation[]; routePoints?: RoutePoint[] }> {
-  const [places, foods] = await Promise.allSettled([recommendAttractions(request), recommendRestaurants(request)]);
+  const [places, foods] = await Promise.allSettled([recommendAttractions(request), recommendRestaurantsForRoute(request, plan.route.points)]);
   const routePoints = places.status === 'fulfilled' ? places.value : [];
   const analysisRoute = routePoints.length ? [{ ...plan.route.startPoint }, ...routePoints] : plan.route.points;
   const analysis = await analyzeTrip({ ...plan, route: { ...plan.route, points: analysisRoute as TripPlan['route']['points'] } }, request).catch(() => '');
@@ -133,7 +133,8 @@ function toRoutePoint(item: Record<string, any>, request: TripRequest, index: nu
   };
 }
 
-async function recommendRestaurants(request: TripRequest): Promise<FoodRecommendation[]> {
+export async function recommendRestaurantsForRoute(request: TripRequest, routePoints: RoutePoint[]): Promise<FoodRecommendation[]> {
+  const verifiedFoods = buildFoodRecommendations(request);
   const response = await fetch(apiUrl('/api/restaurants/guide'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -141,6 +142,10 @@ async function recommendRestaurants(request: TripRequest): Promise<FoodRecommend
       city: request.destinationCity,
       keywords: `${request.destinationCity}特色菜`,
       limit: 6,
+      routePoints: routePoints
+        .filter((point) => Number.isFinite(point.lng) && Number.isFinite(point.lat))
+        .map((point) => ({ id: point.id, name: point.name, lng: point.lng, lat: point.lat, day: point.day ?? 1 })),
+      verifiedShops: verifiedFoods.map((food) => ({ name: food.name })),
       preferences: {
         budgetPerPerson: Math.max(1, Math.round(request.budget / Math.max(1, request.days))),
         interests: request.interests,
@@ -151,25 +156,55 @@ async function recommendRestaurants(request: TripRequest): Promise<FoodRecommend
   });
   const payload = await readPayload(response, '餐厅指导失败');
   const rows: Array<Record<string, any>> = Array.isArray(payload.recommendations) ? payload.recommendations : [];
-  const checkedAt = new Date().toISOString().slice(0, 10);
-  return rows.slice(0, 6).filter((item) => item && item.id && item.name).map((item) => {
+  const analyzedAt = typeof payload.generatedAt === 'string' ? payload.generatedAt : new Date().toISOString();
+  const checkedAt = analyzedAt.slice(0, 10);
+  const byVerifiedName = new Map(verifiedFoods.map((food) => [normalizeRestaurantName(food.name), food]));
+  const dynamic = rows.slice(0, 6).filter((item) => item && item.id && item.name).flatMap((item) => {
+    const verifiedName = String(item.verifiedShopName || item.name);
+    const verified = byVerifiedName.get(normalizeRestaurantName(verifiedName));
+    if (!verified) return [];
     const location = item.location && Number.isFinite(Number(item.location.lng)) && Number.isFinite(Number(item.location.lat))
       ? `${Number(item.location.lng)},${Number(item.location.lat)}` : '';
     const sourceUrl = location
       ? `https://uri.amap.com/marker?position=${encodeURIComponent(location)}&name=${encodeURIComponent(String(item.name))}`
       : `https://uri.amap.com/search?keyword=${encodeURIComponent(`${request.destinationCity} ${item.name}`)}`;
-    const tags = [item.category, item.recommendationReason].filter(Boolean).map(String).slice(0, 2);
-    return {
+    const tags = [item.category, ...verified.tags].filter(Boolean).map(String).slice(0, 2);
+    return [{
       id: String(item.id),
-      name: String(item.name),
+      name: verified.name,
       area: [item.district, item.address].filter(Boolean).join(' · ') || request.destinationCity,
       priceRange: Number.isFinite(Number(item.averageCost)) ? `约 ¥${Number(item.averageCost)}/人` : '消费以商家最新信息为准',
       businessStatus: '非实时，出发前核验' as const,
       tags,
-      dianpingUrl: '',
+      dianpingUrl: verified.dianpingUrl,
+      aiInsight: conciseInsight(String(item.recommendationReason || ''), item.nearestRoutePoint?.name || item.nearestPointName, item.routeDistanceMeters),
+      nearestPointName: String(item.nearestRoutePoint?.name || item.nearestPointName || '路线点'),
+      distanceMeters: Number.isFinite(Number(item.routeDistanceMeters)) ? Math.max(0, Math.round(Number(item.routeDistanceMeters))) : undefined,
+      analysisSource: 'qwen-amap' as const,
+      analyzedAt,
       source: { name: '高德动态查询 + 千问排序', url: sourceUrl, checkedAt },
-    };
+    }];
   });
+  const seen = new Set(dynamic.map((food) => normalizeRestaurantName(food.name)));
+  const fallbacks = verifiedFoods.filter((food) => !seen.has(normalizeRestaurantName(food.name)));
+  return [...dynamic, ...fallbacks].slice(0, 6);
+}
+
+function normalizeRestaurantName(value: string) {
+  return value.replace(/[\s·・（）()\-—]/g, '').replace(/店$/u, '').toLowerCase();
+}
+
+function conciseInsight(reason: string, pointName?: string, distanceMeters?: unknown) {
+  const compact = reason.replace(/\s+/g, ' ').trim().replace(/[。；;]+$/u, '');
+  const routeFact = pointName
+    ? `靠近${pointName}${Number.isFinite(Number(distanceMeters)) ? `约${formatDistance(Number(distanceMeters))}` : ''}`
+    : '已结合当前路线分析';
+  const result = compact ? `${routeFact}；${compact}` : `${routeFact}，预算与口味匹配度已由 AI 动态评估`;
+  return `${result.slice(0, 66)}${result.length > 66 ? '…' : '。'}`;
+}
+
+function formatDistance(meters: number) {
+  return meters < 1000 ? `${Math.max(10, Math.round(meters / 10) * 10)}米` : `${(meters / 1000).toFixed(meters < 10000 ? 1 : 0)}公里`;
 }
 
 async function readPayload(response: Response, message: string): Promise<any> {

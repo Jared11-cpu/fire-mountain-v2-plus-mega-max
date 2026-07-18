@@ -20,7 +20,7 @@ describe('travel backend integration', () => {
       const url = String(input);
       if (url.includes('/api/attractions/search')) return new Response(JSON.stringify({ items: [{ id: 'bridge', name: '武汉长江大桥', district: '武昌区', address: '长江之上', location: { lng: 114.288, lat: 30.55 } }, { id: 'museum', name: '湖北省博物馆', district: '武昌区', location: { lng: 114.367, lat: 30.56 } }] }), { status: 200 });
       if (url.endsWith('/api/ai/recommend')) return new Response(JSON.stringify({ data: { status: 'ok', ranked: [{ id: 'museum', reason: '符合历史偏好', fitScore: 90 }, { id: 'bridge', reason: '用户明确要求', fitScore: 100 }], warnings: [] } }), { status: 200 });
-      if (url.endsWith('/api/restaurants/guide')) return new Response(JSON.stringify({ recommendations: [{ id: 'poi-1', name: '真实湖北菜馆', district: '江汉区', address: '测试路1号', averageCost: 68, category: '湖北菜', recommendationReason: '预算匹配', location: { lng: 114.3, lat: 30.5 } }] }), { status: 200 });
+      if (url.endsWith('/api/restaurants/guide')) return new Response(JSON.stringify({ generatedAt: '2026-07-18T10:00:00.000Z', recommendations: [{ id: 'poi-1', name: '蔡林记吉庆街店', verifiedShopName: '蔡林记（吉庆街店）', district: '江汉区', address: '吉庆街', averageCost: 28, category: '热干面', recommendationReason: '早餐顺路且预算匹配', nearestRoutePoint: { name: '武汉长江大桥' }, routeDistanceMeters: 860, location: { lng: 114.3, lat: 30.5 } }] }), { status: 200 });
       if (url.endsWith('/api/ai/analyze')) return new Response(JSON.stringify({ data: { analysis: '路线包含用户指定的武汉长江大桥，并补充历史文化地点。' } }), { status: 200 });
       return new Response(JSON.stringify({ error: 'unexpected request' }), { status: 500 });
     });
@@ -29,8 +29,12 @@ describe('travel backend integration', () => {
     expect(result.analysis).toContain('武汉长江大桥');
     expect(result.routePoints?.[0]).toMatchObject({ name: '武汉长江大桥', lat: 30.55, lng: 114.288 });
     expect(result.routePoints?.[0].reason).toContain('首页明确提出的必经地点');
-    expect(result.foods?.[0]).toMatchObject({ id: 'poi-1', name: '真实湖北菜馆', priceRange: '约 ¥68/人' });
+    expect(result.foods?.[0]).toMatchObject({ id: 'poi-1', name: '蔡林记（吉庆街店）', priceRange: '约 ¥28/人', dianpingUrl: 'https://www.dianping.com/shop/l3LoOn1gi2ggY01E', nearestPointName: '武汉长江大桥', distanceMeters: 860, analysisSource: 'qwen-amap' });
     expect(fetcher.mock.calls.map((call) => String(call[0]))).toEqual(expect.arrayContaining([expect.stringContaining('/api/attractions/search'), '/api/ai/recommend', '/api/restaurants/guide', '/api/ai/analyze']));
     expect(fetcher.mock.calls.map((call) => String(call[0]))).toContain('/api/attractions/search?city=%E6%AD%A6%E6%B1%89&keywords=%E6%AD%A6%E6%B1%89%E9%95%BF%E6%B1%9F%E5%A4%A7%E6%A1%A5&pageSize=10&allTypes=1');
+    const restaurantCall = fetcher.mock.calls.find((call) => String(call[0]).endsWith('/api/restaurants/guide')) as unknown as [RequestInfo | URL, RequestInit] | undefined;
+    const restaurantBody = JSON.parse(String(restaurantCall?.[1]?.body));
+    expect(restaurantBody.routePoints.length).toBeGreaterThan(1);
+    expect(restaurantBody.verifiedShops).toEqual(expect.arrayContaining([{ name: '蔡林记（吉庆街店）' }]));
   });
 });

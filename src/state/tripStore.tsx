@@ -12,6 +12,7 @@ import {
   daysBetween,
   defaultTripRequest,
   generateTripPlan,
+  getVerifiedDianpingShopUrl,
   isIsoDate,
   INTERESTS,
   normalizeRequest,
@@ -93,8 +94,11 @@ function readInitialState(): TripState {
     legacyEntries = [];
   }
   const request = persisted?.version === 2 ? normalizeRequest(persisted.request) : fallbackRequest;
+  const storedFoods = persisted?.version === 2 && persisted.plan
+    ? persisted.plan.foodRecommendations?.filter((food) => getVerifiedDianpingShopUrl(food.dianpingUrl)) ?? []
+    : [];
   const persistedPlan = persisted?.version === 2 && persisted.plan
-    ? { ...persisted.plan, foodRecommendations: buildFoodRecommendations(request) }
+    ? { ...persisted.plan, foodRecommendations: storedFoods.length ? storedFoods : buildFoodRecommendations(request) }
     : null;
   return {
     request,

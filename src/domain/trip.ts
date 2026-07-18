@@ -55,6 +55,11 @@ export type FoodRecommendation = {
   businessStatus: '非实时，出发前核验';
   tags: string[];
   dianpingUrl: string;
+  aiInsight?: string;
+  nearestPointName?: string;
+  distanceMeters?: number;
+  analysisSource?: 'qwen-amap' | 'rules';
+  analyzedAt?: string;
   source: { name: string; url: string; checkedAt: string };
 };
 
@@ -284,7 +289,14 @@ export function daysBetween(start: string, end: string) { return Math.floor((par
 export function isIsoDate(value: string) { if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false; const parsed = parseLocalDate(value); return toIsoDate(parsed) === value; }
 
 function filterFoods(request: TripRequest): FoodRecommendation[] {
-  let rows = foodLibrary[request.destinationCity].map((item, index) => ({ ...item, id: `food-${request.destinationCity}-${index}`, businessStatus: '非实时，出发前核验' as const }));
+  let rows = foodLibrary[request.destinationCity].map((item, index) => ({
+    ...item,
+    id: `food-${request.destinationCity}-${index}`,
+    businessStatus: '非实时，出发前核验' as const,
+    aiInsight: `适合作为${request.destinationCity}路线中的${item.tags[0] ?? '本地风味'}备选，AI 将按实时路线距离、预算和饮食偏好继续核验。`,
+    nearestPointName: '等待路线动态匹配',
+    analysisSource: 'rules' as const,
+  }));
   if (request.dietaryRestrictions.includes('素食')) rows = rows.filter((row) => row.tags.some((tag) => /素|小吃|早餐/.test(tag)));
   return rows.map((row) => request.dietaryRestrictions.includes('不吃辣') ? { ...row, tags: unique([...row.tags, '下单时明确要求不辣']) } : row);
 }
@@ -345,5 +357,16 @@ export function extractRequestedPlaces(text: string) {
 }
 
 export function buildFoodRecommendations(request: TripRequest) { return filterFoods(request); }
+
+export function getVerifiedDianpingShopUrl(value?: string) {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    const isDianping = url.hostname === 'www.dianping.com' || url.hostname === 'm.dianping.com';
+    return isDianping && /^\/shop\/[A-Za-z0-9]+\/?$/.test(url.pathname) ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export type PersistedAppState = { version: 2; request: TripRequest; plan: TripPlan | null; journalEntries: JournalEntry[] };
