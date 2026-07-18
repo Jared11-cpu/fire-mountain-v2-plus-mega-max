@@ -17,6 +17,7 @@ describe('transportService', () => {
     expect(result.segments.every((segment) => segment.arrivalTime > segment.departureTime)).toBe(true);
     expect(result.notices[0]).toContain('未配置可用的动态公交代理');
     expect(result.segments.every((segment) => segment.legs.length === 1)).toBe(true);
+    expect(result.segments.every((segment) => segment.legs.every((leg) => leg.polyline.length === 0))).toBe(true);
   });
 
   it('配置后端地址时使用交通 API 响应', async () => {
@@ -59,6 +60,7 @@ describe('transportService', () => {
     expect(result.recommendedOptionId).toBe('driving');
     expect(result.analysisSource).toBe('qwen-amap');
     expect(result.reason).toContain('用时更短');
+    expect(result.options.find((option) => option.id === 'driving')?.plan.segments.every((segment) => segment.legs.every((leg) => leg.polyline.length === 0))).toBe(true);
   });
 });
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { baseRoutes } from '../data/routeData';
 import type { TransportPlanResponse } from '../services/transportService';
 import { compactTravelTip, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointPrimaryDetailLink, getPointServiceLinks, getVerifiedCtripDetailUrl, isDirectCtripDetailUrl, normalizeActualStayMinutes } from './MapWorkspace';
-import { getFocusedTransportPath } from './RouteMap';
+import { getFocusedTransportPath, getFocusedTransportSegmentPoints } from './RouteMap';
 
 describe('getPointServiceLinks', () => {
   it('assigns every planned stop its own traceable representative cover', () => {
@@ -175,6 +175,8 @@ describe('getBudgetUsageVisual', () => {
 describe('getFocusedTransportPath', () => {
   it('returns only the selected segment geometry for map focus', () => {
     const plan = {
+      source: 'transport-api',
+      freshness: 'live-query',
       segments: [
         { id: 'segment-1', legs: [{ polyline: [[111, 30], [111.1, 30.1]] }] },
         { id: 'segment-2', legs: [{ polyline: [[112, 31], [112.1, 31.1]] }, { polyline: [[112.1, 31.1], [112.2, 31.2]] }] },
@@ -183,5 +185,14 @@ describe('getFocusedTransportPath', () => {
 
     expect(getFocusedTransportPath(plan, 'segment-2')).toEqual([[112, 31], [112.1, 31.1], [112.1, 31.1], [112.2, 31.2]]);
     expect(getFocusedTransportPath(plan, 'missing')).toEqual([]);
+    expect(getFocusedTransportPath({ ...plan, source: 'rules-fallback', freshness: 'estimate' } as TransportPlanResponse, 'segment-2')).toEqual([]);
+  });
+
+  it('maps a focused transport segment back to its adjacent route points', () => {
+    const route = { points: baseRoutes.宜昌.points.slice(0, 3) } as never;
+    const plan = { segments: [{ id: 'first' }, { id: 'second' }] } as TransportPlanResponse;
+
+    expect(getFocusedTransportSegmentPoints(route, plan, 'second').map((point) => point.name)).toEqual(baseRoutes.宜昌.points.slice(1, 3).map((point) => point.name));
+    expect(getFocusedTransportSegmentPoints(route, plan, 'missing')).toEqual([]);
   });
 });

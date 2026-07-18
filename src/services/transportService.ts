@@ -209,7 +209,7 @@ export async function resolveDrivingTransportPlan(request: TransportPlanRequest,
         ...(path.tolls === undefined ? {} : { fare: path.tolls }),
         instruction: path.steps?.map((step) => step.instruction).filter(Boolean).slice(0, 3).join('；') || '按高德本次道路规划行驶，出发前再次刷新路况。',
         liveStatus: '高德动态道路规划',
-        legs: [{ id: `${point.id}-${next.id}-drive`, mode: 'taxi', lineName: '驾车路线', viaStops: [], durationMinutes: path.durationMinutes, distanceKm: path.distanceKm, polyline: path.polyline ?? [[point.lng, point.lat], [next.lng, next.lat]] }],
+        legs: [{ id: `${point.id}-${next.id}-drive`, mode: 'taxi', lineName: '驾车路线', viaStops: [], durationMinutes: path.durationMinutes, distanceKm: path.distanceKm, polyline: path.polyline?.length ? path.polyline : [] }],
       };
     });
     const totalFare = segments.reduce((sum, segment) => sum + (segment.fare ?? 0), 0);
@@ -272,7 +272,7 @@ export function buildRulesTransportPlan(request: TransportPlanRequest): Transpor
       mode,
       costEstimate: costRange(mode, distanceKm),
       instruction: instructionFor(mode, durationMinutes, request.travelerType),
-      legs: [{ id: `${point.id}-${next.id}-estimate`, mode: legMode, viaStops: [], durationMinutes, distanceKm: Math.round(distanceKm * 10) / 10, polyline: [[point.lng, point.lat], [next.lng, next.lat]] }],
+      legs: [{ id: `${point.id}-${next.id}-estimate`, mode: legMode, viaStops: [], durationMinutes, distanceKm: Math.round(distanceKm * 10) / 10, polyline: [] }],
     };
   });
   const totalMinutes = segments.reduce((sum, segment) => sum + segment.durationMinutes, 0);
@@ -294,7 +294,7 @@ export function buildRulesDrivingPlan(request: TransportPlanRequest): TransportP
       id: `${point.id}-${next.id}-drive-estimate`, from: point.name, to: next.name, departureTime,
       arrivalTime: shiftClock(departureTime, durationMinutes), durationMinutes, distanceKm, mode: '驾车',
       costEstimate: '油费与过路费待导航', instruction: '当前为规则估算，恢复高德服务后将显示真实道路、用时与过路费。',
-      legs: [{ id: `${point.id}-${next.id}-drive-estimate-leg`, mode: 'taxi', lineName: '驾车估算', viaStops: [], durationMinutes, distanceKm, polyline: [[point.lng, point.lat], [next.lng, next.lat]] }],
+      legs: [{ id: `${point.id}-${next.id}-drive-estimate-leg`, mode: 'taxi', lineName: '驾车估算', viaStops: [], durationMinutes, distanceKm, polyline: [] }],
     };
   });
   const totalMinutes = segments.reduce((sum, segment) => sum + segment.durationMinutes, 0);
