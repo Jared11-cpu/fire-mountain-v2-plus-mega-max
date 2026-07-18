@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { defaultTripRequest, generateTripPlan } from '../domain/trip';
-import { resolveTransportPlan, toTransportPlanRequest, type TransportPlanResponse } from './transportService';
+import { resolveDrivingTransportPlan, resolveTransportComparison, resolveTransportPlan, toTransportPlanRequest, type TransportPlanResponse } from './transportService';
 
 function requestFixture() {
   const request = defaultTripRequest('宜昌');
@@ -35,6 +35,30 @@ describe('transportService', () => {
     expect(result.source).toBe('rules-fallback');
     expect(result.sourceLabel).toContain('规则降级');
     expect(result.notices[0]).toContain('HTTP 503');
+  });
+
+  it('按每段路线组合高德驾车方案', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ paths: [{ durationMinutes: 18, distanceKm: 9.4, tolls: 0, polyline: [[111.1, 30.1], [111.2, 30.2]], steps: [{ instruction: '沿主路行驶' }] }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch;
+    const result = await resolveDrivingTransportPlan(requestFixture(), { endpoint: 'https://example.test/route', fetcher });
+    expect(result.sourceLabel).toBe('高德动态驾车规划');
+    expect(result.segments).toHaveLength(5);
+    expect(result.segments.every((segment) => segment.mode === '驾车')).toBe(true);
+    expect(result.segments[0].instruction).toContain('沿主路行驶');
+  });
+
+  it('对比高德公交和驾车事实并采用千问推荐', async () => {
+    const transit: TransportPlanResponse = { source: 'transport-api', sourceLabel: '高德动态公交规划', generatedAt: new Date().toISOString(), isRealtime: false, freshness: 'live-query', totalMinutes: 80, totalDistanceKm: 30, totalFare: 8, summary: '公交可用', segments: [], notices: [] };
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/transit')) return new Response(JSON.stringify(transit), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (url.endsWith('/route')) return new Response(JSON.stringify({ paths: [{ durationMinutes: 20, distanceKm: 12, tolls: 0, polyline: [] }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ recommendedOptionId: 'driving', reason: '驾车用时更短。', cautions: ['出发前刷新路况。'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as unknown as typeof fetch;
+    const result = await resolveTransportComparison(requestFixture(), { transitEndpoint: 'https://example.test/transit', routeEndpoint: 'https://example.test/route', adviceEndpoint: 'https://example.test/advice', fetcher });
+    expect(result.options.map((option) => option.id)).toEqual(['transit', 'driving']);
+    expect(result.recommendedOptionId).toBe('driving');
+    expect(result.analysisSource).toBe('qwen-amap');
+    expect(result.reason).toContain('用时更短');
   });
 });
 
