@@ -135,7 +135,7 @@ function Stops({ points, selectedId, fallbackImageUrl, dailyRecords, maxDays, on
   useEffect(() => {
     const controller = new AbortController();
     const unresolved = points.filter((point) => !getCuratedPointCover(point.name) && !point.imageUrl);
-    if (unresolved.length) Promise.all(unresolved.map(async (point) => [point.id, await fetchPointCover(point.city, point.name, controller.signal)] as const))
+    if (unresolved.length) Promise.all(unresolved.map(async (point) => [point.id, await fetchPointCover(point.city, point.name, controller.signal, { lng: point.lng, lat: point.lat })] as const))
       .then((results) => setFetchedCovers((current) => ({ ...current, ...Object.fromEntries(results.filter((item): item is readonly [string, PointCover] => Boolean(item[1]))) })))
       .catch(() => undefined);
     return () => controller.abort();

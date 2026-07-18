@@ -77,6 +77,8 @@ async function recommendAttractions(request: TripRequest): Promise<RoutePoint[]>
   const rows: Array<Record<string, any>> = searches.flatMap((result) => result.status === 'fulfilled' ? result.value.items.map((item) => ({ ...item, sourceQuery: result.value.query })) : []);
   const candidates = [...new Map(rows.filter(validPoi).map((item) => [String(item.id), item])).values()]
     .filter((item) => !request.avoidPlaces.some((name) => String(item.name).includes(name)))
+    .filter((item) => isRequiredCandidate(item, required) || !isLowValueUnphotographedPoi(item))
+    .sort((left, right) => Number(hasPoiPhoto(right)) - Number(hasPoiPhoto(left)))
     .slice(0, 50);
   if (!candidates.length) return [];
 
@@ -113,6 +115,20 @@ function bestRequiredMatch(query: string, candidates: Array<Record<string, any>>
   return best?.score > 0 ? best.item : undefined;
 }
 
+function isRequiredCandidate(item: Record<string, any>, required: string[]) {
+  const name = normalizePlaceName(String(item.name));
+  return required.some((query) => name.includes(normalizePlaceName(query)) || normalizePlaceName(query).includes(name));
+}
+
+function hasPoiPhoto(item: Record<string, any>) {
+  return Array.isArray(item.photos) && item.photos.some((value) => typeof value === 'string' && value.trim());
+}
+
+function isLowValueUnphotographedPoi(item: Record<string, any>) {
+  if (hasPoiPhoto(item)) return false;
+  return /(?:党建|法治|廉政|休闲|文化|健身)广场$|停车场|游客集散点/u.test(String(item.name));
+}
+
 function normalizePlaceName(value: string) {
   return value
     .replace(/[\s·（）()]/g, '')
@@ -122,6 +138,12 @@ function normalizePlaceName(value: string) {
 
 function toRoutePoint(item: Record<string, any>, request: TripRequest, index: number): RoutePoint {
   const requested = request.requestedPlaces.some((name) => normalizePlaceName(String(item.name)).includes(normalizePlaceName(name)) || normalizePlaceName(name).includes(normalizePlaceName(String(item.name))));
+  const imageUrl = Array.isArray(item.photos) ? String(item.photos.find((value: unknown) => typeof value === 'string' && value.trim()) || '').replace(/^http:\/\//i, 'https://') : '';
+  const imageCredit = imageUrl ? {
+    author: '高德地图地点相册',
+    license: '来源与使用规则见地点页',
+    sourceUrl: `https://uri.amap.com/marker?position=${Number(item.location.lng)},${Number(item.location.lat)}&name=${encodeURIComponent(String(item.name))}`,
+  } : undefined;
   return {
     id: `amap-${String(item.id)}`, name: String(item.name), type: 'scenic', city: request.destinationCity,
     lng: Number(item.location.lng), lat: Number(item.location.lat), coordinateSystem: 'gcj02', time: '', stayMinutes: requested ? 90 : 60,
@@ -130,6 +152,7 @@ function toRoutePoint(item: Record<string, any>, request: TripRequest, index: nu
     recordTip: '记下这一站最喜欢的细节。',
     day: Math.min(request.days, Math.floor(index / Math.max(1, Math.ceil(Math.min(10, Math.max(4, request.days * 3)) / request.days))) + 1),
     openingHours: item.openingHours || undefined,
+    ...(imageUrl && imageCredit ? { imageUrl, imageCredit } : {}),
   };
 }
 

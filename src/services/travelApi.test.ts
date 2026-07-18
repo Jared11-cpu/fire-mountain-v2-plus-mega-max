@@ -18,7 +18,7 @@ describe('travel backend integration', () => {
     const plan = generateTripPlan(request as never, null);
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes('/api/attractions/search')) return new Response(JSON.stringify({ items: [{ id: 'bridge', name: '武汉长江大桥', district: '武昌区', address: '长江之上', location: { lng: 114.288, lat: 30.55 } }, { id: 'museum', name: '湖北省博物馆', district: '武昌区', location: { lng: 114.367, lat: 30.56 } }] }), { status: 200 });
+      if (url.includes('/api/attractions/search')) return new Response(JSON.stringify({ items: [{ id: 'bridge', name: '武汉长江大桥', district: '武昌区', address: '长江之上', location: { lng: 114.288, lat: 30.55 }, photos: ['http://aos-comment.amap.com/wuhan-bridge.jpg'] }, { id: 'museum', name: '湖北省博物馆', district: '武昌区', location: { lng: 114.367, lat: 30.56 }, photos: ['https://aos-comment.amap.com/hubei-museum.jpg'] }, { id: 'square', name: '法治文化广场', district: '武昌区', location: { lng: 114.31, lat: 30.57 }, photos: [] }] }), { status: 200 });
       if (url.endsWith('/api/ai/recommend')) return new Response(JSON.stringify({ data: { status: 'ok', ranked: [{ id: 'museum', reason: '符合历史偏好', fitScore: 90 }, { id: 'bridge', reason: '用户明确要求', fitScore: 100 }], warnings: [] } }), { status: 200 });
       if (url.endsWith('/api/restaurants/guide')) return new Response(JSON.stringify({ generatedAt: '2026-07-18T10:00:00.000Z', recommendations: [{ id: 'poi-1', name: '蔡林记吉庆街店', verifiedShopName: '蔡林记（吉庆街店）', district: '江汉区', address: '吉庆街', averageCost: 28, category: '热干面', recommendationReason: '早餐顺路且预算匹配', nearestRoutePoint: { name: '武汉长江大桥' }, routeDistanceMeters: 860, location: { lng: 114.3, lat: 30.5 } }] }), { status: 200 });
       if (url.endsWith('/api/ai/analyze')) return new Response(JSON.stringify({ data: { analysis: '路线包含用户指定的武汉长江大桥，并补充历史文化地点。' } }), { status: 200 });
@@ -27,7 +27,7 @@ describe('travel backend integration', () => {
     vi.stubGlobal('fetch', fetcher);
     const result = await enrichTripPlanWithBackend(plan, request as never);
     expect(result.analysis).toContain('武汉长江大桥');
-    expect(result.routePoints?.[0]).toMatchObject({ name: '武汉长江大桥', lat: 30.55, lng: 114.288 });
+    expect(result.routePoints?.[0]).toMatchObject({ name: '武汉长江大桥', lat: 30.55, lng: 114.288, imageUrl: 'https://aos-comment.amap.com/wuhan-bridge.jpg', imageCredit: { author: '高德地图地点相册' } });
     expect(result.routePoints?.[0].reason).toContain('首页明确提出的必经地点');
     expect(result.foods?.[0]).toMatchObject({ id: 'poi-1', name: '蔡林记（吉庆街店）', priceRange: '约 ¥28/人', dianpingUrl: 'https://www.dianping.com/shop/l3LoOn1gi2ggY01E', nearestPointName: '武汉长江大桥', distanceMeters: 860, analysisSource: 'qwen-amap' });
     expect(fetcher.mock.calls.map((call) => String(call[0]))).toEqual(expect.arrayContaining([expect.stringContaining('/api/attractions/search'), '/api/ai/recommend', '/api/restaurants/guide', '/api/ai/analyze']));
@@ -36,5 +36,8 @@ describe('travel backend integration', () => {
     const restaurantBody = JSON.parse(String(restaurantCall?.[1]?.body));
     expect(restaurantBody.routePoints.length).toBeGreaterThan(1);
     expect(restaurantBody.verifiedShops).toEqual(expect.arrayContaining([{ name: '蔡林记（吉庆街店）' }]));
+    const recommendCall = fetcher.mock.calls.find((call) => String(call[0]).endsWith('/api/ai/recommend')) as unknown as [RequestInfo | URL, RequestInit] | undefined;
+    const recommendBody = JSON.parse(String(recommendCall?.[1]?.body));
+    expect(recommendBody.candidates.map((item: { id: string }) => item.id)).not.toContain('square');
   });
 });

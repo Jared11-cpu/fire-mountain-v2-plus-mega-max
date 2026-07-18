@@ -21,6 +21,12 @@ const CURATED_COVERS: ReadonlyArray<{ matches: (name: string) => boolean; cover:
   { matches: (name) => /武汉古建筑|江汉关/.test(name), cover: commonsCover('20230208 Hankow Customs House.jpg') },
   { matches: (name) => /黄鹤楼/.test(name), cover: commonsCover('CN - Hubei - Wuhan - Kranichpagode.jpg') },
   { matches: (name) => /昙华林/.test(name), cover: commonsCover('Tanhualin.JPG') },
+  { matches: (name) => /宜昌东站/.test(name), cover: commonsCover('Platforms of Yichang East Railway Station.JPG', 'CaiDie', 'CC BY-SA 3.0') },
+  { matches: (name) => /三峡工程党建文化广场|三峡大坝|三峡游客中心/.test(name), cover: commonsCover('Three Gorges Dam.jpg', 'Dan Kamminga', 'CC BY-SA 2.0') },
+  { matches: (name) => /坛子岭/.test(name), cover: commonsCover('200407-sandouping-sanxiadaba.jpg') },
+  { matches: (name) => /185\s*平台/.test(name), cover: commonsCover('Drei-Schluchten-Damm (Jangtse).jpg') },
+  { matches: (name) => /西坝/.test(name), cover: commonsCover('Hanyi Road-Central Street 01.jpg') },
+  { matches: (name) => /宜昌.*滨江|滨江公园/.test(name), cover: commonsCover('从滨江公园看对面的雨 - panoramio.jpg', 'Danny Luo', 'CC BY-SA 3.0') },
 ];
 
 export function getCuratedPointCover(name: string) {
@@ -36,7 +42,16 @@ type CommonsPage = {
   }>;
 };
 
-export async function fetchPointCover(city: string, pointName: string, signal?: AbortSignal): Promise<PointCover | undefined> {
+type AmapPhotoPoi = {
+  name?: string;
+  location?: { lng?: number; lat?: number };
+  photos?: string[];
+};
+
+export async function fetchPointCover(city: string, pointName: string, signal?: AbortSignal, location?: { lng: number; lat: number }): Promise<PointCover | undefined> {
+  const amapCover = await fetchAmapPointCover(city, pointName, signal, location).catch(() => undefined);
+  if (amapCover) return amapCover;
+
   const params = new URLSearchParams({
     action: 'query', format: 'json', origin: '*', generator: 'search', gsrnamespace: '6', gsrlimit: '5',
     gsrsearch: `${city} ${pointName}`, prop: 'imageinfo', iiprop: 'url|extmetadata', iiurlwidth: '1280',
@@ -57,4 +72,64 @@ export async function fetchPointCover(city: string, pointName: string, signal?: 
       sourceUrl: `https://commons.wikimedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, '_'))}`,
     },
   };
+}
+
+async function fetchAmapPointCover(city: string, pointName: string, signal?: AbortSignal, location?: { lng: number; lat: number }): Promise<PointCover | undefined> {
+  const exactParams = new URLSearchParams({ city, keywords: pointName, pageSize: '10', allTypes: '1' });
+  const exactRows = await fetchAmapPhotoRows(exactParams, signal);
+  let selected = selectAmapPhoto(exactRows, pointName);
+  let nearby = false;
+
+  if (!selected && location && Number.isFinite(location.lng) && Number.isFinite(location.lat)) {
+    const nearbyParams = new URLSearchParams({ city, keywords: '景点', pageSize: '25', location: `${location.lng},${location.lat}` });
+    const nearbyRows = await fetchAmapPhotoRows(nearbyParams, signal);
+    selected = selectStableNearbyPhoto(nearbyRows, pointName);
+    nearby = Boolean(selected);
+  }
+
+  const imageUrl = securePhotoUrl(selected?.photos?.find(Boolean));
+  if (!selected || !imageUrl) return undefined;
+  const markerName = selected.name || pointName;
+  const markerLocation = selected.location && Number.isFinite(selected.location.lng) && Number.isFinite(selected.location.lat)
+    ? `position=${selected.location.lng},${selected.location.lat}&` : '';
+  return {
+    imageUrl,
+    imageCredit: {
+      author: nearby ? `高德地图 · ${markerName}附近实景` : '高德地图地点相册',
+      license: '来源与使用规则见地点页',
+      sourceUrl: `https://uri.amap.com/marker?${markerLocation}name=${encodeURIComponent(markerName)}`,
+    },
+  };
+}
+
+async function fetchAmapPhotoRows(params: URLSearchParams, signal?: AbortSignal) {
+  const response = await fetch(`/api/attractions/search?${params}`, { signal });
+  if (!response.ok) return [];
+  const payload = await response.json() as { items?: AmapPhotoPoi[] };
+  return Array.isArray(payload.items) ? payload.items : [];
+}
+
+function selectAmapPhoto(rows: AmapPhotoPoi[], pointName: string) {
+  const needle = normalizePlaceName(pointName);
+  const matching = rows.filter((row) => {
+    const name = normalizePlaceName(row.name || '');
+    return Boolean(name) && (name === needle || name.includes(needle) || needle.includes(name));
+  });
+  return matching.find((row) => row.photos?.some(Boolean));
+}
+
+function selectStableNearbyPhoto(rows: AmapPhotoPoi[], pointName: string) {
+  const candidates = rows.filter((row) => row.photos?.some(Boolean));
+  if (!candidates.length) return undefined;
+  const hash = [...pointName].reduce((sum, char) => (sum * 31 + (char.codePointAt(0) || 0)) >>> 0, 0);
+  return candidates[hash % candidates.length];
+}
+
+function normalizePlaceName(value: string) {
+  return value.replace(/[\s·・（）()\-—]/g, '').replace(/(?:风景名胜区|风景区|旅游区|景区)$/u, '');
+}
+
+function securePhotoUrl(value?: string) {
+  if (!value) return undefined;
+  return value.replace(/^http:\/\//i, 'https://');
 }
