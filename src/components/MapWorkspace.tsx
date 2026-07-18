@@ -146,7 +146,7 @@ function Stops({ points, selectedId, fallbackImageUrl, dailyRecords, maxDays, on
       {expanded && <div className="space-y-4 p-4">
         <div className="grid grid-cols-2 gap-2 text-xs font-bold"><InfoTile icon={Clock3} label="停留时间" value={`${point.durationMinutes} 分钟`} /><InfoTile icon={Navigation} label="下一段交通" value={point.travelMinutesToNext ? `${point.travelMinutesToNext} 分钟` : '行程终点'} /></div>
         <section className="rounded-2xl border border-ink/10 p-3"><div className="mb-3 flex items-center justify-between"><strong className="text-sm">我的地点安排</strong><span className="rounded-full bg-jade/10 px-2 py-1 text-[10px] font-black text-jade">自动保存</span></div><div className="grid grid-cols-2 gap-2"><label className="text-[11px] font-black text-ink/50">安排日期<select value={point.day ?? 1} onChange={(event) => onPatchPoint(point.id, { day: Number(event.target.value) })} className="focus-ring mt-1 w-full rounded-xl border border-ink/10 bg-white px-2 py-2 text-sm font-bold text-ink">{Array.from({ length: maxDays }, (_, day) => <option key={day + 1} value={day + 1}>第{day + 1}天</option>)}</select></label><label className="text-[11px] font-black text-ink/50">停留分钟<input type="number" min={10} max={480} step={5} value={point.durationMinutes} onChange={(event) => onPatchPoint(point.id, { durationMinutes: Math.max(10, Number(event.target.value) || 10) })} className="focus-ring mt-1 w-full rounded-xl border border-ink/10 px-2 py-2 text-sm font-bold text-ink" /></label></div><label className="mt-3 block text-[11px] font-black text-ink/50">我的安排<textarea value={notes[point.id] ?? ''} placeholder="例如：提前预约、重点拍摄坝体全景、为老人预留休息时间" onChange={(event) => onPatchNote(point.id, event.target.value)} rows={3} className="focus-ring mt-1 w-full resize-none rounded-xl border border-ink/10 px-3 py-2 text-sm font-medium text-ink" /></label></section>
-        <div className="flex justify-end"><a href={serviceLinks.detailUrl} target="_blank" rel="noreferrer" aria-label={`${point.name}地点详细信息`} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white transition hover:bg-river">地点详细信息<ExternalLink className="h-3.5 w-3.5" /></a></div>
+        <div className="flex justify-end">{serviceLinks.detailUrl ? <a href={serviceLinks.detailUrl} target="_blank" rel="noreferrer" aria-label={`${point.name}${serviceLinks.kind === 'railway' ? '铁路站点详情' : '携程景点详细信息'}`} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white transition hover:bg-river">{serviceLinks.kind === 'railway' ? '铁路站点详情' : '携程 · 景点详情'}<ExternalLink className="h-3.5 w-3.5" /></a> : <span aria-label={`${point.name}携程暂无独立详情`} className="inline-flex items-center rounded-full bg-ink/[.06] px-3 py-2 text-[11px] font-black text-ink/40">携程暂无独立详情</span>}</div>
       </div>}
     </article>; })}</div>;
 }
@@ -154,13 +154,14 @@ function Stops({ points, selectedId, fallbackImageUrl, dailyRecords, maxDays, on
 type PointServiceLinkSet = {
   kind: 'railway' | 'attraction';
   amapUrl: string;
-  detailUrl: string;
+  detailUrl?: string;
   bookingUrl: string;
 };
 
 const CTRIP_DETAIL_URLS: Readonly<Record<string, string>> = {
   // 携程旧版 searchsite/sight 深链会返回 432 或空白页；路线点位逐一绑定已核验页面。
   三峡游客中心: 'https://you.ctrip.com/traffic/yichang313/g51289164.html',
+  三峡工程党建文化广场: 'https://you.ctrip.com/sight/yichang313/140201.html',
   坛子岭观景台: 'https://you.ctrip.com/sight/yichang313/46345.html',
   '185 平台': 'https://you.ctrip.com/sight/yichang313/1508935.html',
   西坝不夜城: 'https://you.ctrip.com/sight/yichang313/151629835.html',
@@ -179,20 +180,54 @@ const CTRIP_DETAIL_URLS: Readonly<Record<string, string>> = {
   峡谷民宿观景台: 'https://you.ctrip.com/sight/enshigrandcanyon2128618.html',
   荆州博物馆: 'https://you.ctrip.com/sight/jingzhou413/134921.html',
   宾阳楼: 'https://you.ctrip.com/sight/jingzhou413/5073085.html',
-  早堂面老店: 'https://you.ctrip.com/food/jingzhou413.html',
+  早堂面老店: 'https://you.ctrip.com/food/jingzhou413/99558-food.html',
   古城墙步道: 'https://you.ctrip.com/sight/jingzhou413/52023.html',
-  沙市洋码头: 'https://you.ctrip.com/place/jingzhou413.html',
+  沙市洋码头: 'https://you.ctrip.com/sight/jingzhou413/148913974.html',
   襄阳古城北街: 'https://you.ctrip.com/sight/xiangyang414/5716122.html',
   古隆中: 'https://you.ctrip.com/sight/xiangyang414/48889.html',
-  襄阳牛肉面: 'https://you.ctrip.com/food/xiangyang414.html',
+  襄阳牛肉面: 'https://you.ctrip.com/food/xiangyang414/7712486.html',
   唐城影视基地: 'https://you.ctrip.com/sight/xiangyang414/1699843.html',
   汉江桥畔: 'https://you.ctrip.com/sight/xiangyang414/1834681.html',
   黄石国家矿山公园: 'https://you.ctrip.com/sight/huangshi710/141134.html',
   矿冶主题展区: 'https://you.ctrip.com/sight/huangshi710/141134.html',
   磁湖岸线: 'https://you.ctrip.com/sight/huangshi710/52097.html',
-  黄石港饼老店: 'https://you.ctrip.com/food/huangshi710.html',
   团城山公园: 'https://you.ctrip.com/sight/huangshi710/52097.html',
 };
+
+const CTRIP_DETAIL_ALIASES: ReadonlyArray<{ matches: (name: string) => boolean; url: string }> = [
+  { matches: (name) => /185(?:平台|观景)/.test(name), url: 'https://you.ctrip.com/sight/yichang313/1508935.html' },
+  { matches: (name) => /坛子岭/.test(name), url: 'https://you.ctrip.com/sight/yichang313/46345.html' },
+  { matches: (name) => /三峡工程|三峡大坝|党建文化广场/.test(name), url: 'https://you.ctrip.com/sight/yichang313/140201.html' },
+  { matches: (name) => /武汉大学|珞珈山/.test(name), url: 'https://you.ctrip.com/sight/145/1493507.html' },
+  { matches: (name) => /武汉长江大桥/.test(name), url: 'https://you.ctrip.com/sight/wuhan145/8978.html' },
+  { matches: (name) => /黄鹤楼/.test(name), url: 'https://you.ctrip.com/sight/wuhan145/8979.html' },
+  { matches: (name) => /恩施大峡谷/.test(name), url: 'https://you.ctrip.com/sight/enshigrandcanyon2128618.html' },
+  { matches: (name) => /荆州古城|古城墙/.test(name), url: 'https://you.ctrip.com/sight/jingzhou413/52023.html' },
+  { matches: (name) => /襄阳古城|北街/.test(name), url: 'https://you.ctrip.com/sight/xiangyang414/5716122.html' },
+  { matches: (name) => /唐城/.test(name), url: 'https://you.ctrip.com/sight/xiangyang414/1699843.html' },
+  { matches: (name) => /黄石国家矿山公园|矿冶/.test(name), url: 'https://you.ctrip.com/sight/huangshi710/141134.html' },
+  { matches: (name) => /磁湖|团城山/.test(name), url: 'https://you.ctrip.com/sight/huangshi710/52097.html' },
+];
+
+export function isDirectCtripDetailUrl(value?: string) {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    if (url.hostname !== 'you.ctrip.com') return false;
+    return /^\/(?:sight|traffic|food)\/(?![^/]+\.html$).+\.html$/i.test(url.pathname)
+      || /^\/sight\/[^/]+\d+\.html$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+export function getVerifiedCtripDetailUrl(point: Pick<RoutePoint, 'name' | 'type'>) {
+  if (point.type === 'start' && /(?:站|高铁站|火车站)$/.test(point.name.trim())) return undefined;
+  const exact = CTRIP_DETAIL_URLS[point.name.trim()];
+  if (isDirectCtripDetailUrl(exact)) return exact;
+  const alias = CTRIP_DETAIL_ALIASES.find((item) => item.matches(point.name.trim()))?.url;
+  return isDirectCtripDetailUrl(alias) ? alias : undefined;
+}
 
 export function getPointServiceLinks(point: Pick<RoutePoint, 'name' | 'city' | 'type'> & Partial<Pick<RoutePoint, 'lat' | 'lng'>>): PointServiceLinkSet {
   const keyword = encodeURIComponent(`${point.city} ${point.name}`);
@@ -206,7 +241,7 @@ export function getPointServiceLinks(point: Pick<RoutePoint, 'name' | 'city' | '
     amapUrl: exactAmapUrl,
     detailUrl: isRailwayStation
       ? 'https://kyfw.12306.cn/mormhweb/czyd_2143/'
-      : CTRIP_DETAIL_URLS[point.name] ?? exactAmapUrl,
+      : getVerifiedCtripDetailUrl(point),
     bookingUrl: isRailwayStation
       ? 'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc'
       : ctripTicketSearchUrl,

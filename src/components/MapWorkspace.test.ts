@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { baseRoutes } from '../data/routeData';
-import { compactTravelTip, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointServiceLinks } from './MapWorkspace';
+import { compactTravelTip, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointServiceLinks, getVerifiedCtripDetailUrl, isDirectCtripDetailUrl } from './MapWorkspace';
 
 describe('getPointServiceLinks', () => {
   it('assigns every planned stop its own traceable representative cover', () => {
@@ -45,19 +45,33 @@ describe('getPointServiceLinks', () => {
     expect(links.detailUrl).toBe('https://you.ctrip.com/sight/145/1493507.html');
   });
 
-  it('falls back to an exact coordinate marker for an unmapped attraction', () => {
+  it('does not disguise another page as the detail page for an unmapped attraction', () => {
     const links = getPointServiceLinks({ name: '临时点位', city: '武汉', type: 'scenic', lat: 30.5, lng: 114.3 });
 
-    expect(links.detailUrl).toContain('uri.amap.com/marker');
-    expect(links.detailUrl).toContain('position=114.3,30.5');
+    expect(links.detailUrl).toBeUndefined();
+    expect(links.amapUrl).toContain('uri.amap.com/marker');
+    expect(links.amapUrl).toContain('position=114.3,30.5');
+  });
+
+  it('maps a Three Gorges sub-area to the verified direct Ctrip attraction page', () => {
+    expect(getVerifiedCtripDetailUrl({ name: '三峡工程党建文化广场', type: 'scenic' })).toBe('https://you.ctrip.com/sight/yichang313/140201.html');
+  });
+
+  it('rejects Ctrip home, search, city guide, and category pages as detail links', () => {
+    expect(isDirectCtripDetailUrl('https://www.ctrip.com/')).toBe(false);
+    expect(isDirectCtripDetailUrl('https://you.ctrip.com/searchsite/sight/?query=test')).toBe(false);
+    expect(isDirectCtripDetailUrl('https://you.ctrip.com/place/yichang313.html')).toBe(false);
+    expect(isDirectCtripDetailUrl('https://you.ctrip.com/food/jingzhou413.html')).toBe(false);
   });
 
   it('binds every planned route point to a direct Ctrip page instead of the retired search route', () => {
     for (const route of Object.values(baseRoutes)) {
       for (const point of route.points) {
         const links = getPointServiceLinks(point);
-        expect(links.detailUrl, `${point.city} / ${point.name}`).toContain('you.ctrip.com/');
-        expect(links.detailUrl, `${point.city} / ${point.name}`).not.toContain('/searchsite/');
+        if (point.type !== 'start' && point.name !== '黄石港饼老店') {
+          expect(isDirectCtripDetailUrl(links.detailUrl), `${point.city} / ${point.name}`).toBe(true);
+          expect(links.detailUrl, `${point.city} / ${point.name}`).not.toContain('/searchsite/');
+        }
         expect(links.bookingUrl, `${point.city} / ${point.name}`).toContain('m.ctrip.com/');
         expect(links.bookingUrl, `${point.city} / ${point.name}`).toContain(encodeURIComponent(`${point.city} ${point.name}`));
       }
