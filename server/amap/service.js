@@ -27,6 +27,26 @@ export async function searchPois(env, query, category = 'poi') {
   };
 }
 
+export async function searchPoisAround(env, query, category = 'poi') {
+  const key = requireKey(env);
+  const location = requireCoordinateString(query.get('location'), 'location');
+  const keywords = String(query.get('keywords') || '').trim();
+  if (keywords.length > 80) throw httpError(400, '周边搜索关键词不能超过80个字符');
+  const radius = clamp(query.get('radius'), 0, 50_000, 1500);
+  const pageSize = clamp(query.get('pageSize'), 1, 25, 10);
+  const page = clamp(query.get('page'), 1, 100, 1);
+  const params = new URLSearchParams({ key, location, radius: String(radius), page_size: String(pageSize), page_num: String(page), show_fields: 'business,photos,navi', sortrule: 'distance' });
+  if (keywords) params.set('keywords', keywords);
+  const types = query.get('types') || categoryTypes(category);
+  if (types) params.set('types', types);
+  const data = await amapJson(`/v5/place/around?${params}`, '高德周边地点搜索');
+  return {
+    source: 'amap', category, generatedAt: new Date().toISOString(), total: Number(data.count || data.total || data.pois?.length || 0),
+    items: (data.pois || []).map(normalizePoi),
+    dataNotice: `地点事实来自本次高德${radius}米周边查询；评分、消费、营业时间可能缺失或变化，请以下单页/商家公告为准。`,
+  };
+}
+
 export async function planRoute(env, input) {
   const key = requireKey(env);
   const mode = ['driving', 'walking', 'bicycling', 'transit'].includes(input.mode) ? input.mode : 'driving';

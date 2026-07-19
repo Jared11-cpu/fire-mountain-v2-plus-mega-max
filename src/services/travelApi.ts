@@ -163,12 +163,12 @@ export async function recommendRestaurantsForRoute(request: TripRequest, routePo
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       city: request.destinationCity,
-      keywords: `${request.destinationCity}特色菜`,
-      limit: 6,
+      keywords: '餐厅',
+      limit: 12,
+      radiusMeters: 1500,
       routePoints: routePoints
         .filter((point) => Number.isFinite(point.lng) && Number.isFinite(point.lat))
         .map((point) => ({ id: point.id, name: point.name, lng: point.lng, lat: point.lat, day: point.day ?? 1 })),
-      verifiedShops: verifiedFoods.map((food) => ({ name: food.name })),
       preferences: {
         budgetPerPerson: Math.max(1, Math.round(request.budget / Math.max(1, request.days))),
         interests: request.interests,
@@ -182,24 +182,25 @@ export async function recommendRestaurantsForRoute(request: TripRequest, routePo
   const analyzedAt = typeof payload.generatedAt === 'string' ? payload.generatedAt : new Date().toISOString();
   const checkedAt = analyzedAt.slice(0, 10);
   const byVerifiedName = new Map(verifiedFoods.map((food) => [normalizeRestaurantName(food.name), food]));
-  const dynamic = rows.slice(0, 6).filter((item) => item && item.id && item.name).flatMap((item) => {
+  const dynamic = rows.slice(0, 12).filter((item) => item && item.id && item.name).flatMap((item) => {
     const verifiedName = String(item.verifiedShopName || item.name);
     const verified = byVerifiedName.get(normalizeRestaurantName(verifiedName));
-    if (!verified) return [];
     const location = item.location && Number.isFinite(Number(item.location.lng)) && Number.isFinite(Number(item.location.lat))
       ? `${Number(item.location.lng)},${Number(item.location.lat)}` : '';
     const sourceUrl = location
       ? `https://uri.amap.com/marker?position=${encodeURIComponent(location)}&name=${encodeURIComponent(String(item.name))}`
       : `https://uri.amap.com/search?keyword=${encodeURIComponent(`${request.destinationCity} ${item.name}`)}`;
-    const tags = [item.category, ...verified.tags].filter(Boolean).map(String).slice(0, 2);
+    const tags = [compactRestaurantCategory(item.category), Number.isFinite(Number(item.rating)) ? `高德评分 ${Number(item.rating).toFixed(1)}` : '', ...(verified?.tags ?? [])].filter(Boolean).map(String).slice(0, 3);
+    const dianpingUrl = verified?.dianpingUrl ?? getDianpingSearchUrl(request.destinationCity, String(item.name));
     return [{
       id: String(item.id),
-      name: verified.name,
+      name: String(item.name),
       area: [item.district, item.address].filter(Boolean).join(' · ') || request.destinationCity,
       priceRange: Number.isFinite(Number(item.averageCost)) ? `约 ¥${Number(item.averageCost)}/人` : '消费以商家最新信息为准',
       businessStatus: '非实时，出发前核验' as const,
       tags,
-      dianpingUrl: verified.dianpingUrl,
+      dianpingUrl,
+      dianpingLinkType: verified ? 'direct' as const : 'search' as const,
       aiInsight: conciseInsight(String(item.recommendationReason || ''), item.nearestRoutePoint?.name || item.nearestPointName, item.routeDistanceMeters),
       nearestPointName: String(item.nearestRoutePoint?.name || item.nearestPointName || '路线点'),
       distanceMeters: Number.isFinite(Number(item.routeDistanceMeters)) ? Math.max(0, Math.round(Number(item.routeDistanceMeters))) : undefined,
@@ -208,9 +209,19 @@ export async function recommendRestaurantsForRoute(request: TripRequest, routePo
       source: { name: '高德动态查询 + 千问排序', url: sourceUrl, checkedAt },
     }];
   });
-  const seen = new Set(dynamic.map((food) => normalizeRestaurantName(food.name)));
-  const fallbacks = verifiedFoods.filter((food) => !seen.has(normalizeRestaurantName(food.name)));
-  return [...dynamic, ...fallbacks].slice(0, 6);
+  return dynamic;
+}
+
+const dianpingCityIds: Record<string, string> = { 武汉: '16', 宜昌: '179', 恩施: '1368', 荆州: '184', 襄阳: '180', 黄石: '177' };
+
+export function getDianpingSearchUrl(city: string, shopName: string) {
+  const cityId = dianpingCityIds[city] || '0';
+  const keyword = cityId === '0' ? `${city} ${shopName}` : shopName;
+  return `https://www.dianping.com/search/keyword/${cityId}/0_${encodeURIComponent(keyword)}`;
+}
+
+function compactRestaurantCategory(value: unknown) {
+  return String(value || '').split(';').map((item) => item.trim()).filter(Boolean).slice(-1)[0] || '餐饮';
 }
 
 function normalizeRestaurantName(value: string) {

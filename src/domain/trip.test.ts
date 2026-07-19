@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addDaysIso, budgetTotal, buildFoodRecommendations, buildSocialCopy, calculateTimeline, daysBetween, decodeSharePlan, defaultTripRequest, encodeSharePlan, generateTripPlan, parseLocalDate, parseTravelRequest } from './trip';
+import { addDaysIso, budgetTotal, buildFoodRecommendations, buildSocialCopy, calculateTimeline, daysBetween, decodeSharePlan, defaultTripRequest, encodeSharePlan, generateTripPlan, getSafeDianpingUrl, parseLocalDate, parseTravelRequest } from './trip';
 import type { RoutePoint } from '../types/route';
 
 describe('buildFoodRecommendations', () => {
@@ -10,6 +10,12 @@ describe('buildFoodRecommendations', () => {
     expect(foods[0].name).toContain('郑信记凉虾');
     expect(foods.every((food) => /dianping\.com\/shop\//.test(food.dianpingUrl))).toBe(true);
     expect(foods.every((food) => !food.dianpingUrl.includes('/search/keyword/'))).toBe(true);
+  });
+
+  it('accepts only safe Dianping detail or keyword-search destinations', () => {
+    expect(getSafeDianpingUrl('https://www.dianping.com/shop/9960962')).toBeTruthy();
+    expect(getSafeDianpingUrl('https://www.dianping.com/search/keyword/179/0_%E5%87%89%E8%99%BE')).toBeTruthy();
+    expect(getSafeDianpingUrl('https://example.com/search/keyword/179/0_test')).toBeUndefined();
   });
 });
 

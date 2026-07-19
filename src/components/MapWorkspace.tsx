@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import { AlertTriangle, ArrowLeft, Bus, CalendarDays, CarFront, Check, ChevronDown, CircleDollarSign, Clock3, CloudRain, CloudSun, Droplets, ExternalLink, Footprints, ImagePlus, Loader2, MapPin, Navigation, PencilLine, Plus, ReceiptText, RefreshCw, Route as RouteIcon, Sparkles, Sun, Sunrise, Sunset, TrainFront, Trash2, Umbrella, Utensils, Wind } from 'lucide-react';
 import type { TravelPlan } from '../utils/aiGenerator';
 import type { JournalEntry, RoutePoint, SmartRoute } from '../types/route';
-import { budgetTotal, getVerifiedDianpingShopUrl, parseLocalDate, type BudgetItem, type FoodRecommendation, type PlannedRoutePoint, type TripRequest } from '../domain/trip';
+import { budgetTotal, getSafeDianpingUrl, getVerifiedDianpingShopUrl, parseLocalDate, type BudgetItem, type FoodRecommendation, type PlannedRoutePoint, type TripRequest } from '../domain/trip';
 import { useTrip } from '../state/tripStore';
 import { resolveTransportComparison, toTransportPlanRequest, type TransportChoice, type TransportChoiceId, type TransportComparison, type TransportLeg, type TransportSegment, type TransitStrategy, type TransportMode } from '../services/transportService';
 import { recommendRestaurantsForRoute } from '../services/travelApi';
@@ -690,36 +690,38 @@ export function getDianpingShopDetailUrl(value?: string) {
 function Food({ plan }: { plan: NonNullable<ReturnType<typeof useTrip>['plan']> }) {
   const { request, patchPlan, notify } = useTrip();
   const [refreshing, setRefreshing] = useState(false);
-  const analyzedFoods = plan.foodRecommendations.filter((food) => food.analysisSource === 'qwen-amap');
-  const anchorCount = new Set(analyzedFoods.map((food) => food.nearestPointName).filter(Boolean)).size;
-  const nearestDistance = analyzedFoods.map((food) => food.distanceMeters).filter((value): value is number => Number.isFinite(value)).sort((left, right) => left - right)[0];
-  const refresh = async () => {
+  const [hasAutoRefreshed, setHasAutoRefreshed] = useState(false);
+  const refresh = useCallback(async () => {
     if (refreshing) return;
     setRefreshing(true);
     try {
       const foods = await recommendRestaurantsForRoute(request, plan.route.points);
       patchPlan((value) => ({ ...value, foodRecommendations: foods }));
-      notify('已按当前路线刷新餐饮店与 AI 分析', 'success');
+      notify(foods.length ? `已找到 ${foods.length} 家当前路线周边餐饮` : '当前路线周边暂未查到可用餐饮', foods.length ? 'success' : 'info');
     } catch {
-      notify('餐饮动态分析暂不可用，已保留核验过的店铺直达页', 'info');
+      notify('路线周边餐饮查询暂不可用，请稍后重新刷新', 'info');
     } finally {
       setRefreshing(false);
     }
-  };
-  return <div className="space-y-4"><div className="flex items-end justify-between gap-3"><div><h4 className="font-display text-2xl font-black">路线餐饮点</h4><p className="mt-1 text-[11px] font-bold text-ink/45">高德沿路线检索 · 千问实时分析</p></div><button type="button" disabled={refreshing} onClick={refresh} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white px-3 py-2 text-[10px] font-black text-river shadow-sm disabled:opacity-55"><RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />{refreshing ? '分析中' : '刷新分析'}</button></div>
-    <section aria-label="路线餐饮 KPI" className="grid grid-cols-3 gap-2 rounded-[1.5rem] bg-gradient-to-br from-ink to-river p-3 text-white shadow-[0_14px_32px_rgba(18,34,42,.16)]"><FoodKpi label="AI 候选" value={`${plan.foodRecommendations.length} 家`} /><FoodKpi label="覆盖路线点" value={anchorCount ? `${anchorCount} 处` : '待匹配'} /><FoodKpi label="最近路线" value={nearestDistance === undefined ? '待分析' : formatFoodDistance(nearestDistance)} /></section>
-    {plan.foodRecommendations.length ? plan.foodRecommendations.map((food) => <FoodRecommendationCard key={food.id} food={food} />) : <p className="rounded-2xl bg-white p-4 text-sm font-bold text-ink/55">当前限制条件下没有合适条目，请放宽筛选或自行核验。</p>}</div>;
+  }, [notify, patchPlan, plan.route.points, refreshing, request]);
+  useEffect(() => {
+    if (hasAutoRefreshed) return;
+    setHasAutoRefreshed(true);
+    void refresh();
+  }, [hasAutoRefreshed, refresh]);
+  return <div className="space-y-4"><div className="flex items-end justify-between gap-3"><div><h4 className="font-display text-2xl font-black">路线附近吃什么</h4><p className="mt-1 text-[11px] font-bold text-ink/45">逐站搜索 1.5 km 内真实餐饮 · 高德动态更新</p></div><button type="button" disabled={refreshing} onClick={() => void refresh()} className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border border-river/10 bg-white px-3.5 py-2.5 text-[11px] font-black text-river shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:opacity-55"><RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />{refreshing ? '搜索沿线餐厅' : '重新搜附近'}</button></div>
+    {refreshing && <div role="status" className="overflow-hidden rounded-[1.4rem] border border-river/10 bg-gradient-to-r from-river/[0.08] via-white to-jade/[0.09] p-4"><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-river text-white"><Loader2 className="h-5 w-5 animate-spin" /></span><div><strong className="block text-sm font-black">正在扫描每一个路线点</strong><p className="mt-1 text-[10px] font-bold text-ink/45">搜索附近真实餐饮并按顺路程度整理</p></div></div></div>}
+    {!refreshing && plan.foodRecommendations.length ? plan.foodRecommendations.map((food) => <FoodRecommendationCard key={food.id} food={food} />) : !refreshing && <p className="rounded-[1.4rem] border border-dashed border-ink/10 bg-white p-5 text-sm font-bold leading-6 text-ink/55">当前路线周边暂未查到可用餐饮。你可以点击“重新搜附近”再次获取，不会用固定示例店铺填充。</p>}</div>;
 }
 
 function FoodRecommendationCard({ food }: { food: FoodRecommendation }) {
   const detailUrl = getDianpingShopDetailUrl(food.dianpingUrl);
+  const dianpingUrl = getSafeDianpingUrl(food.dianpingUrl);
   const dynamic = food.analysisSource === 'qwen-amap';
-  return <article className="overflow-hidden rounded-3xl bg-white shadow-[0_12px_30px_rgba(18,34,42,.08)]"><div className="p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h5 className="font-display text-lg font-black leading-snug">{food.name}</h5><p className="mt-1.5 text-xs font-bold leading-5 text-ink/55">{food.area} · {food.priceRange}</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-black ${dynamic ? 'bg-river/10 text-river' : 'bg-ink/5 text-ink/40'}`}>{dynamic ? 'AI 实时' : '待刷新'}</span></div><div className="mt-2 flex flex-wrap gap-1">{food.tags.map((tag) => <span key={tag} className="rounded-full bg-jade/10 px-2 py-1 text-[10px] font-black text-jade">{tag}</span>)}</div>{food.aiInsight && <div className="mt-3 rounded-2xl border border-river/10 bg-gradient-to-br from-river/[0.075] to-jade/[0.06] p-3"><div className="flex items-center gap-2 text-[10px] font-black text-river"><Sparkles className="h-3.5 w-3.5" />AI 路线分析</div><p className="mt-1.5 text-[11px] font-bold leading-5 text-ink/65">{food.aiInsight}</p>{food.nearestPointName && <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-white/75 px-2 py-1 text-[9px] font-black text-ink/48"><MapPin className="h-3 w-3 text-tower" />{food.nearestPointName}{food.distanceMeters !== undefined ? ` · ${formatFoodDistance(food.distanceMeters)}` : ''}</span>}</div>}<p className="mt-3 text-[10px] font-bold text-tower">营业信息非实时，出发前请在商户页核验</p></div><div className="border-t border-ink/6 bg-[#fffaf7] p-3">{detailUrl ? <a href={detailUrl} target="_blank" rel="noreferrer" aria-label={`打开${food.name}大众点评商户详情`} className="flex w-full items-center justify-between rounded-2xl bg-[#fff0e9] px-3.5 py-3 text-xs font-black text-[#c94724] transition hover:bg-[#ffddd0]"><span>大众点评 · 该店详情</span><ExternalLink className="h-4 w-4" /></a> : <span className="flex w-full items-center justify-between rounded-2xl bg-ink/5 px-3.5 py-3 text-xs font-black text-ink/35"><span>未找到已核验的店铺直达页</span><AlertTriangle className="h-4 w-4" /></span>}</div></article>;
+  return <article className="group overflow-hidden rounded-[1.65rem] border border-ink/[0.055] bg-white shadow-[0_12px_30px_rgba(18,34,42,.07)] transition hover:-translate-y-0.5 hover:border-river/15 hover:shadow-[0_18px_38px_rgba(18,34,42,.11)]"><div className="p-4">{food.nearestPointName && <div className="mb-3 flex items-center gap-2 text-[10px] font-black text-river"><span className="grid h-7 w-7 place-items-center rounded-xl bg-river/10"><MapPin className="h-3.5 w-3.5" /></span><span>靠近 {food.nearestPointName}</span>{food.distanceMeters !== undefined && <span className="rounded-full bg-river/[0.07] px-2 py-1">{formatFoodDistance(food.distanceMeters)}</span>}</div>}<div className="flex items-start justify-between gap-3"><div className="min-w-0"><h5 className="font-display text-lg font-black leading-snug">{food.name}</h5><p className="mt-1.5 text-xs font-bold leading-5 text-ink/55">{food.area}</p><strong className="mt-1 block text-xs font-black text-tower">{food.priceRange}</strong></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-black ${dynamic ? 'bg-jade/10 text-jade' : 'bg-ink/5 text-ink/40'}`}>{dynamic ? '本次查询' : '待更新'}</span></div><div className="mt-3 flex flex-wrap gap-1.5">{food.tags.map((tag) => <span key={tag} className="rounded-full bg-ink/[0.045] px-2.5 py-1 text-[10px] font-black text-ink/55">{tag}</span>)}</div>{food.aiInsight && <div className="mt-3 rounded-2xl border border-river/10 bg-gradient-to-br from-river/[0.07] to-jade/[0.055] p-3"><div className="flex items-center gap-2 text-[10px] font-black text-river"><Sparkles className="h-3.5 w-3.5" />为什么适合这条路线</div><p className="mt-1.5 text-[11px] font-bold leading-5 text-ink/65">{food.aiInsight}</p></div>}<p className="mt-3 text-[10px] font-bold text-tower">评分、价格与营业状态可能变化，出发前请在商户页核验</p></div><div className="border-t border-ink/6 bg-[#fffaf7] p-3">{dianpingUrl ? <a href={dianpingUrl} target="_blank" rel="noreferrer" aria-label={`${detailUrl ? '打开' : '在大众点评查找'}${food.name}${detailUrl ? '商户详情' : ''}`} className="flex min-h-11 w-full items-center justify-between rounded-2xl bg-[#fff0e9] px-3.5 py-3 text-xs font-black text-[#c94724] transition hover:bg-[#ffddd0]"><span>{detailUrl ? '大众点评 · 该店详情' : '大众点评 · 精确查找该店'}</span><ExternalLink className="h-4 w-4 transition group-hover:translate-x-0.5" /></a> : <span className="flex min-h-11 w-full items-center justify-between rounded-2xl bg-ink/5 px-3.5 py-3 text-xs font-black text-ink/35"><span>大众点评暂未收录可用入口</span><AlertTriangle className="h-4 w-4" /></span>}</div></article>;
 }
 
 function formatFoodDistance(meters: number) { return meters < 1000 ? `约 ${Math.max(10, Math.round(meters / 10) * 10)} m` : `约 ${(meters / 1000).toFixed(meters < 10000 ? 1 : 0)} km`; }
-
-function FoodKpi({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl border border-white/10 bg-white/10 p-2.5 backdrop-blur"><span className="block text-[9px] font-bold text-white/45">{label}</span><strong className="mt-1 block text-xs">{value}</strong></div>; }
 
 export function getBudgetUsageVisual(actual: number, planned: number) {
   const percent = planned > 0 ? Math.max(0, Math.round((actual / planned) * 100)) : actual > 0 ? 100 : 0;

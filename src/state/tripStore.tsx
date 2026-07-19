@@ -12,7 +12,7 @@ import {
   daysBetween,
   defaultTripRequest,
   generateTripPlan,
-  getVerifiedDianpingShopUrl,
+  getSafeDianpingUrl,
   isIsoDate,
   INTERESTS,
   normalizeRequest,
@@ -92,7 +92,7 @@ function readInitialState(): TripState {
   }
   const request = persisted?.version === 2 ? normalizeRequest(persisted.request) : fallbackRequest;
   const storedFoods = persisted?.version === 2 && persisted.plan
-    ? persisted.plan.foodRecommendations?.filter((food) => getVerifiedDianpingShopUrl(food.dianpingUrl)) ?? []
+    ? persisted.plan.foodRecommendations?.filter((food) => getSafeDianpingUrl(food.dianpingUrl)) ?? []
     : [];
   const persistedPlan = persisted?.version === 2 && persisted.plan
     ? { ...persisted.plan, foodRecommendations: storedFoods.length ? storedFoods : buildFoodRecommendations(request) }

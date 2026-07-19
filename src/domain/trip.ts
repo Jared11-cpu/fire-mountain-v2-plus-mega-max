@@ -56,6 +56,7 @@ export type FoodRecommendation = {
   businessStatus: '非实时，出发前核验';
   tags: string[];
   dianpingUrl: string;
+  dianpingLinkType?: 'direct' | 'search';
   aiInsight?: string;
   nearestPointName?: string;
   distanceMeters?: number;
@@ -365,6 +366,19 @@ export function getVerifiedDianpingShopUrl(value?: string) {
     const url = new URL(value);
     const isDianping = url.hostname === 'www.dianping.com' || url.hostname === 'm.dianping.com';
     return isDianping && /^\/shop\/[A-Za-z0-9]+\/?$/.test(url.pathname) ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function getSafeDianpingUrl(value?: string) {
+  const direct = getVerifiedDianpingShopUrl(value);
+  if (direct) return direct;
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    const isDianping = url.hostname === 'www.dianping.com' || url.hostname === 'm.dianping.com';
+    return isDianping && /^\/search\/keyword\/\d+\/0_[^/]+\/?$/.test(url.pathname) ? url.toString() : undefined;
   } catch {
     return undefined;
   }

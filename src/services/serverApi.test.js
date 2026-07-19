@@ -111,20 +111,24 @@ describe('Sites API router', () => {
     expect(body.recommendations[0]).toMatchObject({ id: 'poi-1', name: '湖北菜馆', averageCost: 66, fitScore: 92, recommendationReason: '预算合适且评分较高' });
   });
 
-  it('checks verified restaurants live and attaches the nearest route point before AI ranking', async () => {
+  it('searches around every route point and keeps multiple real restaurants before AI ranking', async () => {
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', count: '2', pois: [{ id: 'wrong', name: '其他凉虾', location: '111.30,30.70' }, { id: 'shop-1', name: '郑信记凉虾（致祥路店）', location: '111.286,30.704', adname: '西陵区', business: { rating: '4.6', cost: '18' } }] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ status: 'ok', ranked: [{ id: 'shop-1', reason: '距离路线近，适合安排为小吃补给', fitScore: 95 }], warnings: [] }) } }] }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', count: '1', pois: [{ id: 'shop-1', name: '东站家常菜', location: '111.369,30.692', adname: '伍家岗区', business: { rating: '4.6', cost: '48' } }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', count: '1', pois: [{ id: 'shop-2', name: '三峡鱼馆', location: '111.052,30.821', adname: '夷陵区', business: { rating: '4.7', cost: '78' } }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ status: 'ok', ranked: [{ id: 'shop-2', reason: '靠近第二个路线点且符合本地菜偏好', fitScore: 95 }], warnings: [] }) } }] }), { status: 200 }));
     vi.stubGlobal('fetch', fetcher);
     const response = await worker.fetch(new Request('https://example.test/api/restaurants/guide', {
       method: 'POST',
-      body: JSON.stringify({ city: '宜昌', verifiedShops: [{ name: '郑信记凉虾（致祥路店）' }], routePoints: [{ id: 'station', name: '宜昌东站', lng: 111.3706, lat: 30.6913 }, { id: 'square', name: '三峡工程党建文化广场', lng: 111.05, lat: 30.82 }], preferences: { budgetPerPerson: 60 } }),
+      body: JSON.stringify({ city: '宜昌', keywords: '餐厅', limit: 12, radiusMeters: 1500, routePoints: [{ id: 'station', name: '宜昌东站', lng: 111.3706, lat: 30.6913 }, { id: 'square', name: '三峡工程党建文化广场', lng: 111.05, lat: 30.82 }], preferences: { budgetPerPerson: 60 } }),
     }), { AMAP_WEB_SERVICE_KEY: 'amap', DASHSCOPE_API_KEY: 'qwen' });
     const body = await response.json();
     expect(response.status).toBe(200);
-    expect(body.recommendations[0]).toMatchObject({ id: 'shop-1', verifiedShopName: '郑信记凉虾（致祥路店）', nearestRoutePoint: { id: 'station', name: '宜昌东站' }, recommendationReason: '距离路线近，适合安排为小吃补给' });
-    expect(body.recommendations[0].routeDistanceMeters).toBeGreaterThan(0);
-    expect(fetcher.mock.calls[0][0]).toContain('keywords=%E9%83%91%E4%BF%A1%E8%AE%B0%E5%87%89%E8%99%BE');
+    expect(body.recommendations).toHaveLength(2);
+    expect(body.recommendations[0]).toMatchObject({ id: 'shop-2', nearestRoutePoint: { id: 'square', name: '三峡工程党建文化广场' }, recommendationReason: '靠近第二个路线点且符合本地菜偏好' });
+    expect(body.recommendations[1]).toMatchObject({ id: 'shop-1', nearestRoutePoint: { id: 'station', name: '宜昌东站' } });
+    expect(fetcher.mock.calls[0][0]).toContain('/v5/place/around?');
+    expect(fetcher.mock.calls[1][0]).toContain('/v5/place/around?');
+    expect(fetcher.mock.calls[0][0]).toContain('radius=1500');
   });
 
   it('uses the configured Workspace endpoint and reports unsupported providers', async () => {
