@@ -7,6 +7,27 @@ const resolvedCityCodes = new Map(Object.entries(CITY_CODES));
 
 export function amapConfigured(env) { return Boolean(env.AMAP_WEB_SERVICE_KEY); }
 
+export async function reverseGeocode(env, query) {
+  const key = requireKey(env);
+  const raw = coordinateObject(query.get('location'));
+  const coordinateSystem = query.get('coordsys') === 'gps' ? 'wgs84' : 'gcj02';
+  const location = await routeCoordinate(key, { ...raw, coordinateSystem }, 'location');
+  const params = new URLSearchParams({ key, location, extensions: 'base', radius: '1000', roadlevel: '0' });
+  const data = await amapJson(`/v3/geocode/regeo?${params}`, '高德逆地理编码');
+  const regeocode = data.regeocode || {};
+  const component = regeocode.addressComponent || {};
+  const scalar = (value) => Array.isArray(value) ? String(value[0] || '') : String(value || '');
+  const city = scalar(component.city) || scalar(component.province);
+  const street = scalar(component.streetNumber?.street);
+  const number = scalar(component.streetNumber?.number);
+  return {
+    source: 'amap', freshness: 'live-query', generatedAt: new Date().toISOString(), location,
+    formattedAddress: scalar(regeocode.formatted_address), province: scalar(component.province), city,
+    district: scalar(component.district), township: scalar(component.township), street, number,
+    adcode: scalar(component.adcode),
+  };
+}
+
 export async function searchPois(env, query, category = 'poi') {
   const key = requireKey(env);
   const keywords = assertText(query.get('keywords') || query.get('q') || defaultKeyword(category), '搜索关键词', { max: 120 });

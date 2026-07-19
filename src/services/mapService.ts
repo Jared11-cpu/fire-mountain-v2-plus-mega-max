@@ -43,7 +43,7 @@ function locationToRoutePoint(location: UserLocation | undefined, input: Planner
     coordinateSystem: location.status === 'success' ? 'wgs84' : 'gcj02',
     time: '08:30',
     stayMinutes: 10,
-    reason: location.status === 'success' ? '浏览器定位获取的真实出发点，后续可接入高德路径规划。' : '手动选择的 Mock 出发点，用于演示路线生成。',
+    reason: location.status === 'success' ? `浏览器定位获取的真实 GPS 起点，地图将从这里连接至${input.city}行程首站。` : '手动设置的出发点，用于连接目标城市行程。',
     photoTip: '拍一张出发地照片，作为路线记录视频开场。',
     recordTip: '记录出发前的预算、偏好和当天关键词。',
   };

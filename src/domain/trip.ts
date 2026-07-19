@@ -121,6 +121,14 @@ const foodLibrary: Record<CityName, Array<Omit<FoodRecommendation, 'id' | 'busin
   ],
 };
 
+export function updateDestinationCity(request: TripRequest, city: CityName): TripRequest {
+  return {
+    ...request,
+    destinationCity: city,
+    origin: request.origin.source === 'example' ? { ...origins[city] } : { ...request.origin },
+  };
+}
+
 function food(name: string, area: string, priceRange: string, tags: string[], sourceName: string, url: string, dianpingUrl: string) {
   return { name, area, priceRange, tags, dianpingUrl, source: { name: sourceName, url, checkedAt: '2026-07-15' } };
 }
@@ -166,7 +174,7 @@ export function parseTravelRequest(text: string, base = defaultTripRequest()): P
   const tags: ParsedTag[] = [];
   const warnings: string[] = [];
   let city = CITY_NAMES.find((name) => text.includes(name));
-  if (city) { next.destinationCity = city; next.origin = { ...origins[city] }; tags.push({ type: '城市', value: city }); }
+  if (city) { Object.assign(next, updateDestinationCity(next, city)); tags.push({ type: '城市', value: city }); }
   const dayMatch = text.match(/([一二两三四五六七八九十\d]+)天(?:[一二两三四五六七八九十\d]+夜)?/) ?? text.match(/([一二两三四五六七八九十\d]+)日游/);
   if (dayMatch) { next.days = Math.min(15, Math.max(1, chineseNumber(dayMatch[1]))); tags.push({ type: '天数', value: `${next.days}天` }); }
   const budgetMatch = text.match(/(?:预算|人均)\s*(\d{2,6})(?:\s*(?:元|块))?(?:以内|以下)?/) ?? text.match(/(\d{2,6})\s*块(?:以内|以下)?/);
@@ -190,7 +198,7 @@ export function parseTravelRequest(text: string, base = defaultTripRequest()): P
   next.requestedPlaces.forEach((value) => tags.push({ type: '必经地点', value }));
   if (!city) {
     city = inferCityFromPlaces(next.requestedPlaces);
-    if (city) { next.destinationCity = city; next.origin = { ...origins[city] }; tags.push({ type: '城市', value: city }); }
+    if (city) { Object.assign(next, updateDestinationCity(next, city)); tags.push({ type: '城市', value: city }); }
   }
   const originMatch = text.match(/从([^，,。]{2,16})出发/);
   if (originMatch) { next.origin = { ...next.origin, name: originMatch[1].trim(), source: 'manual' }; tags.push({ type: '出发地', value: next.origin.name }); }

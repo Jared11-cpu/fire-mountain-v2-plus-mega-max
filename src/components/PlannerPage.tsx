@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Check, LocateFixed, Loader2, RotateCcw, Sparkles } from 'lucide-react';
 import { cities, examples } from '../data/mockData';
-import { DIETARY_RESTRICTIONS, INTERESTS, SPECIAL_NEEDS, TRAVELERS, type DietaryRestriction, type Interest, type SpecialNeed, type TravelerType } from '../domain/trip';
+import { DIETARY_RESTRICTIONS, INTERESTS, SPECIAL_NEEDS, TRAVELERS, updateDestinationCity, type DietaryRestriction, type Interest, type SpecialNeed, type TravelerType } from '../domain/trip';
 import { getBrowserLocation } from '../services/locationService';
 import type { RoutePoint } from '../types/route';
 import { useTrip } from '../state/tripStore';
@@ -33,10 +33,11 @@ export function PlannerPage() {
 
   const locate = async () => {
     setLocating(true);
-    const result = await getBrowserLocation(request.destinationCity);
-    updateRequest({ origin: { name: result.name, city: result.city, lat: result.lat, lng: result.lng, source: result.status === 'success' ? 'browser' : 'example' } });
-    notify(result.message, result.status === 'success' ? 'success' : 'info');
-    setLocating(false);
+    try {
+      const result = await getBrowserLocation(request.destinationCity);
+      if (result.status === 'success') updateRequest({ origin: { name: result.name, city: result.city, lat: result.lat, lng: result.lng, source: 'browser' } });
+      notify(result.message, result.status === 'success' ? 'success' : 'error');
+    } finally { setLocating(false); }
   };
 
   const toggle = <T extends string>(field: 'interests' | 'dietaryRestrictions' | 'specialNeeds', item: T) => {
@@ -71,11 +72,11 @@ export function PlannerPage() {
             </Field>
 
             <Field label="目的地城市">
-              <div className="grid grid-cols-3 gap-2">{cities.map((city) => <button type="button" key={city.name} aria-pressed={request.destinationCity === city.name} onClick={() => updateRequest({ destinationCity: city.name, origin: { name: `${city.name}站`, city: city.name, lat: city.name === '宜昌' ? 30.6913 : city.name === '恩施' ? 30.336 : 30.59, lng: city.name === '宜昌' ? 111.3706 : city.name === '恩施' ? 109.486 : 114.3, source: 'example' } })} className={`rounded-2xl px-3 py-3 text-sm font-black transition ${request.destinationCity === city.name ? 'bg-ink text-white' : 'bg-white/70 text-ink/70 hover:bg-white'}`}>{city.name}</button>)}</div>
+              <div className="grid grid-cols-3 gap-2">{cities.map((city) => <button type="button" key={city.name} aria-pressed={request.destinationCity === city.name} onClick={() => { const next = updateDestinationCity(request, city.name); updateRequest({ destinationCity: next.destinationCity, origin: next.origin }); }} className={`rounded-2xl px-3 py-3 text-sm font-black transition ${request.destinationCity === city.name ? 'bg-ink text-white' : 'bg-white/70 text-ink/70 hover:bg-white'}`}>{city.name}</button>)}</div>
             </Field>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="出发地" htmlFor="trip-origin"><div className="flex gap-2"><input id="trip-origin" value={request.origin.name} onChange={(event) => updateRequest({ origin: { ...request.origin, name: event.target.value, source: 'manual' } })} className="focus-ring min-w-0 flex-1 rounded-2xl border border-white/70 bg-white px-4 py-3 font-bold" /><button type="button" aria-label="使用浏览器定位" disabled={locating} onClick={locate} className="grid w-12 place-items-center rounded-2xl bg-river text-white disabled:opacity-60">{locating ? <Loader2 className="h-5 w-5 animate-spin" /> : <LocateFixed className="h-5 w-5" />}</button></div></Field>
+              <Field label="出发地" htmlFor="trip-origin"><div className="flex gap-2"><input id="trip-origin" value={request.origin.name} onChange={(event) => updateRequest({ origin: { ...request.origin, name: event.target.value, source: 'manual' } })} className="focus-ring min-w-0 flex-1 rounded-2xl border border-white/70 bg-white px-4 py-3 font-bold" /><button type="button" aria-label="使用浏览器定位" disabled={locating} onClick={locate} className="inline-flex min-h-12 min-w-[9.5rem] items-center justify-center gap-2 rounded-2xl bg-river px-4 text-sm font-black text-white shadow-[0_10px_24px_rgba(14,107,114,.2)] transition hover:-translate-y-0.5 hover:bg-ink disabled:translate-y-0 disabled:opacity-60">{locating ? <Loader2 className="h-5 w-5 animate-spin" /> : <LocateFixed className="h-5 w-5" />}<span>{locating ? '正在定位…' : '定位当前起点'}</span></button></div>{request.origin.source === 'browser' && <div className="mt-2 flex items-start gap-2 rounded-2xl border border-jade/20 bg-jade/10 px-3 py-2.5 text-xs font-bold leading-5 text-river" role="status"><LocateFixed className="mt-0.5 h-4 w-4 shrink-0"/><span>GPS 起点已锁定：{request.origin.name}<small className="block font-semibold text-ink/45">生成后将在地图显示“我的位置 → {request.destinationCity}首站”的真实道路连接。</small></span></div>}</Field>
               <Field label="出行人群" htmlFor="traveler-type"><select id="traveler-type" value={request.travelerType} onChange={(event) => updateRequest({ travelerType: event.target.value as TravelerType })} className="focus-ring w-full rounded-2xl border border-white/70 bg-white px-4 py-3 font-bold">{TRAVELERS.map((item) => <option key={item}>{item}</option>)}</select></Field>
               <Field label="天数" htmlFor="trip-days"><input id="trip-days" type="number" min={1} max={15} value={request.days} onChange={(event) => updateRequest({ days: Number(event.target.value) })} className="focus-ring w-full rounded-2xl border border-white/70 bg-white px-4 py-3 font-black" /></Field>
               <Field label="预算（元）" htmlFor="trip-budget"><input id="trip-budget" type="number" min={0} value={request.budget} onChange={(event) => updateRequest({ budget: Number(event.target.value) })} className="focus-ring w-full rounded-2xl border border-white/70 bg-white px-4 py-3 font-black" /></Field>

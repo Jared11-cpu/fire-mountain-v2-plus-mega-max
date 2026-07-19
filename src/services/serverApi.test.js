@@ -36,6 +36,21 @@ describe('Sites API router', () => {
     expect(body.items[0]).toMatchObject({ id: 'poi-1', name: '测试餐厅', rating: 4.6, averageCost: 58, openingHours: '10:00-22:00', location: { lng: 114.3, lat: 30.5 } });
   });
 
+  it('converts browser GPS coordinates and reverse geocodes the real start address', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', locations: '116.413000,39.910000' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: '1', regeocode: { formatted_address: '北京市朝阳区建国路88号', addressComponent: { province: '北京市', city: [], district: '朝阳区', township: '建外街道', adcode: '110105', streetNumber: { street: '建国路', number: '88号' } } } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetcher);
+
+    const response = await worker.fetch(new Request('https://example.test/api/location/reverse?location=116.4074,39.9042&coordsys=gps'), { AMAP_WEB_SERVICE_KEY: 'test' });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ formattedAddress: '北京市朝阳区建国路88号', city: '北京市', district: '朝阳区', street: '建国路', number: '88号', location: '116.413000,39.910000' });
+    expect(fetcher.mock.calls[0][0]).toContain('/v3/assistant/coordinate/convert?');
+    expect(fetcher.mock.calls[1][0]).toContain('/v3/geocode/regeo?');
+  });
+
   it('rejects an AI recommendation that invents a candidate id', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ status: 'ok', ranked: [{ id: 'invented', reason: '虚构', fitScore: 99 }], warnings: [] }) } }] }), { status: 200 })));
     const response = await worker.fetch(new Request('https://example.test/api/ai/recommend', { method: 'POST', body: JSON.stringify({ candidates: [{ id: 'real-poi', name: '真实地点' }] }) }), { DASHSCOPE_API_KEY: 'test' });

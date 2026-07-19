@@ -72,6 +72,17 @@ describe('parseTravelRequest', () => {
     expect(parseTravelRequest('我想去看三峡奇景，两天，喜欢山水').request.destinationCity).toBe('宜昌');
     expect(parseTravelRequest('必须经过武汉长江大桥').request.destinationCity).toBe('武汉');
   });
+
+  it('识别目标城市时保留浏览器 GPS 出发点并加入路线首站', () => {
+    const base = { ...defaultTripRequest('宜昌'), origin: { name: '北京市朝阳区当前位置', city: '宜昌' as const, lat: 39.9042, lng: 116.4074, source: 'browser' as const } };
+    const request = parseTravelRequest('武汉两天，喜欢历史文化', base).request;
+    const plan = generateTripPlan(request);
+
+    expect(request.destinationCity).toBe('武汉');
+    expect(request.origin).toMatchObject({ name: '北京市朝阳区当前位置', lat: 39.9042, lng: 116.4074, source: 'browser' });
+    expect(plan.route.points[0]).toMatchObject({ name: '北京市朝阳区当前位置', lat: 39.9042, lng: 116.4074, coordinateSystem: 'wgs84' });
+    expect(plan.route.points[1].city).toBe('武汉');
+  });
 });
 
 describe('dates, timeline and plan integrity', () => {

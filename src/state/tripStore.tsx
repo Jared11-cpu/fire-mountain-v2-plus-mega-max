@@ -18,6 +18,7 @@ import {
   normalizeRequest,
   parseTravelRequest,
   updatePlanDates,
+  updateDestinationCity,
   type BudgetItem,
   type ParsedTag,
   type PlannedRoutePoint,
@@ -386,7 +387,7 @@ function mergeAiTravelRequest(local: ReturnType<typeof parseTravelRequest>, ai: 
   const tags = [...local.tags];
   const warnings = [...local.warnings];
   if (ai.city && CITY_NAMES.includes(ai.city as CityName)) {
-    request.destinationCity = ai.city as CityName;
+    Object.assign(request, updateDestinationCity(request, ai.city as CityName));
     tags.push({ type: '城市', value: ai.city });
   } else if (ai.city) warnings.push(`当前页面暂只支持湖北演示城市，未自动切换到“${ai.city}”。`);
   if (ai.days) { request.days = Math.min(15, Math.max(1, Math.round(ai.days))); request.endDate = addDaysIso(request.startDate, request.days - 1); tags.push({ type: '天数', value: `${request.days}天` }); }
