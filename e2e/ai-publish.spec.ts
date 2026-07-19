@@ -24,4 +24,11 @@ test('publishes only the final AI and AMap plan', async ({ page }) => {
   await expect(page.getByRole('region', { name: '路线地图' })).toHaveCount(0);
   await expect(page.getByRole('region', { name: '路线地图' })).toBeVisible();
   await expect(page.getByText('最终千问分析：路线包含用户指定的武汉长江大桥。')).toBeVisible();
+
+  await page.getByRole('tab', { name: '路线' }).click();
+  const transportMinutes = page.getByLabel('下一段交通分钟').first();
+  await transportMinutes.fill('30');
+  await transportMinutes.press('Enter');
+  await expect(transportMinutes).toHaveValue('30');
+  await expect(page.getByRole('link', { name: '武汉站12306到发车次' })).toHaveAttribute('href', /station_code=WHN.*station_name=/);
 });

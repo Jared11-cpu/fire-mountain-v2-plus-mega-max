@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { baseRoutes } from '../data/routeData';
 import type { TransportPlanResponse } from '../services/transportService';
-import { compactTravelTip, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointPrimaryDetailLink, getPointServiceLinks, getVerifiedCtripDetailUrl, isDirectCtripDetailUrl, normalizeActualStayMinutes } from './MapWorkspace';
+import { compactTravelTip, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointPrimaryDetailLink, getPointServiceLinks, getRailwayStationTimetableUrl, getVerifiedCtripDetailUrl, isDirectCtripDetailUrl, normalizeActualStayMinutes, normalizeTravelMinutes, recalculateEditableTimeline } from './MapWorkspace';
 import { getFocusedTransportPath, getFocusedTransportSegmentPoints } from './RouteMap';
 
 describe('getPointServiceLinks', () => {
@@ -17,12 +17,24 @@ describe('getPointServiceLinks', () => {
   });
 
   it('routes railway stations to official 12306 services', () => {
-    const links = getPointServiceLinks({ name: '宜昌东站', city: '宜昌', type: 'start' });
+    const links = getPointServiceLinks({ name: '宜昌东站', city: '宜昌', type: 'start' }, '2026-07-19');
 
     expect(links.kind).toBe('railway');
     expect(links.detailUrl).toContain('12306.cn');
     expect(links.bookingUrl).toContain('12306.cn');
     expect(links.amapUrl).toContain(encodeURIComponent('宜昌 宜昌东站'));
+    expect(links.timetableUrl).toBe('https://kyfw.12306.cn/otn/czxx/init?date=2026-07-19&station_code=HAN&station_name=%E5%AE%9C%E6%98%8C%E4%B8%9C%E7%AB%99');
+  });
+
+  it('builds direct 12306 station timetable links for every supported Hubei start station', () => {
+    const expectedCodes = { 武汉站: 'WHN', 宜昌东站: 'HAN', 恩施站: 'ESN', 荆州站: 'JBN', 襄阳东站: 'EKN', 黄石北站: 'KSN' } as const;
+    for (const [stationName, stationCode] of Object.entries(expectedCodes)) {
+      const url = new URL(getRailwayStationTimetableUrl(stationName, '2026-07-19'));
+      expect(url.origin + url.pathname).toBe('https://kyfw.12306.cn/otn/czxx/init');
+      expect(url.searchParams.get('date')).toBe('2026-07-19');
+      expect(url.searchParams.get('station_code')).toBe(stationCode);
+      expect(url.searchParams.get('station_name')).toBe(stationName);
+    }
   });
 
   it('routes every non-station point to Ctrip details and ticket search', () => {
@@ -100,6 +112,24 @@ describe('normalizeActualStayMinutes', () => {
     expect(normalizeActualStayMinutes(-8)).toBe(0);
     expect(normalizeActualStayMinutes(1600)).toBe(1440);
     expect(normalizeActualStayMinutes('')).toBe(0);
+  });
+});
+
+describe('editable next-leg transport', () => {
+  it('normalizes custom transport minutes', () => {
+    expect(normalizeTravelMinutes(35.6)).toBe(36);
+    expect(normalizeTravelMinutes(-1)).toBe(0);
+    expect(normalizeTravelMinutes(2000)).toBe(1440);
+  });
+
+  it('updates every downstream arrival after a custom transport edit', () => {
+    const source = baseRoutes.武汉.points.slice(0, 3).map((point, index) => ({
+      ...point, arrivalTime: '', durationMinutes: [10, 20, 30][index], travelMinutesToNext: [30, 5, 0][index],
+    }));
+    const result = recalculateEditableTimeline(source as never, '08:30');
+
+    expect(result.map((point) => point.arrivalTime)).toEqual(['08:45', '09:25', '09:50']);
+    expect(result[0].travelMinutesToNext).toBe(30);
   });
 });
 

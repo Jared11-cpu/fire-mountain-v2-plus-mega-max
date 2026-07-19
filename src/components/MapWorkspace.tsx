@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import { AlertTriangle, ArrowLeft, Bus, CalendarDays, CarFront, Check, ChevronDown, CircleDollarSign, Clock3, CloudRain, CloudSun, Droplets, ExternalLink, Footprints, ImagePlus, Loader2, MapPin, Navigation, PencilLine, Plus, ReceiptText, RefreshCw, Route as RouteIcon, Sparkles, Sun, Sunrise, Sunset, TrainFront, Trash2, Umbrella, Utensils, Wifi, WifiOff, Wind } from 'lucide-react';
 import type { TravelPlan } from '../utils/aiGenerator';
 import type { JournalEntry, RoutePoint, SmartRoute } from '../types/route';
-import { budgetTotal, calculateTimeline, getVerifiedDianpingShopUrl, parseLocalDate, type BudgetItem, type FoodRecommendation, type PlannedRoutePoint, type TripRequest } from '../domain/trip';
+import { budgetTotal, getVerifiedDianpingShopUrl, parseLocalDate, type BudgetItem, type FoodRecommendation, type PlannedRoutePoint, type TripRequest } from '../domain/trip';
 import { useTrip } from '../state/tripStore';
 import { resolveTransportComparison, toTransportPlanRequest, type TransportChoice, type TransportChoiceId, type TransportComparison, type TransportLeg, type TransitStrategy, type TransportMode } from '../services/transportService';
 import { recommendRestaurantsForRoute } from '../services/travelApi';
@@ -47,9 +47,9 @@ export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, n
   const handleMapSelect = (point: RoutePoint) => { onSelectPoint(point); setTab('stops'); setMobilePane('details'); };
   const patchRoutePoint = (id: string, changes: Partial<PlannedRoutePoint>) => patchPlan((value) => {
     const source: PlannedRoutePoint[] = (value.route.points as PlannedRoutePoint[]).map((point) => point.id === id ? { ...point, ...changes } as PlannedRoutePoint : point);
-    const points = changes.durationMinutes === undefined
+    const points = changes.durationMinutes === undefined && changes.travelMinutesToNext === undefined
       ? source
-      : calculateTimeline(source, value.settings.departureTime);
+      : recalculateEditableTimeline(source, value.settings.departureTime);
     return {
       ...value,
       route: { ...value.route, points },
@@ -140,7 +140,7 @@ function Stops({ points, selectedId, fallbackImageUrl, dailyRecords, maxDays, on
       .catch(() => undefined);
     return () => controller.abort();
   }, [coverQueryKey]);
-  return <div className="space-y-4"><h4 className="font-display text-2xl font-black">地点安排</h4>{points.map((point, index) => { const expanded = expandedId === point.id; const date = dailyRecords.find((record) => record.day === (point.day ?? 1))?.date; const primaryDetail = getPointPrimaryDetailLink(point); const resolvedCover = getCuratedPointCover(point.name) ?? fetchedCovers[point.id]; const coverUrl = resolvedCover?.imageUrl ?? point.imageUrl ?? fallbackImageUrl; return <article key={point.id} className={`overflow-hidden rounded-[1.65rem] border bg-white transition ${selectedId === point.id ? 'border-river shadow-[0_12px_35px_rgba(14,116,128,.14)]' : 'border-ink/10 shadow-sm'}`}>
+  return <div className="space-y-4"><h4 className="font-display text-2xl font-black">地点安排</h4>{points.map((point, index) => { const expanded = expandedId === point.id; const date = dailyRecords.find((record) => record.day === (point.day ?? 1))?.date; const primaryDetail = getPointPrimaryDetailLink(point); const stationLinks = point.type === 'start' ? getPointServiceLinks(point, date) : null; const resolvedCover = getCuratedPointCover(point.name) ?? fetchedCovers[point.id]; const coverUrl = resolvedCover?.imageUrl ?? point.imageUrl ?? fallbackImageUrl; return <article key={point.id} className={`overflow-hidden rounded-[1.65rem] border bg-white transition ${selectedId === point.id ? 'border-river shadow-[0_12px_35px_rgba(14,116,128,.14)]' : 'border-ink/10 shadow-sm'}`}>
       <button type="button" aria-expanded={expanded} onClick={() => { setExpandedId(expanded ? null : point.id); onSelect(point); }} className="group relative block h-36 w-full overflow-hidden text-left">
         <img src={coverUrl} alt={`${point.name}风景封面`} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.035]" />
         <span className="absolute inset-0 bg-gradient-to-t from-ink/95 via-ink/20 to-transparent" />
@@ -148,9 +148,9 @@ function Stops({ points, selectedId, fallbackImageUrl, dailyRecords, maxDays, on
         <span className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3 text-white"><span><strong className="block font-display text-xl font-black">{point.name}</strong><span className="mt-1 flex items-center gap-2 text-[11px] font-bold text-white/70"><CalendarDays className="h-3.5 w-3.5" />{formatCompactDate(date)}<Clock3 className="ml-1 h-3.5 w-3.5" />{point.arrivalTime}</span></span><ChevronDown className={`h-5 w-5 shrink-0 transition ${expanded ? 'rotate-180' : ''}`} /></span>
       </button>
       {expanded && <div className="space-y-4 p-4">
-        <div className="grid grid-cols-2 gap-2 text-xs font-bold"><EditableStayTile value={point.actualDurationMinutes ?? 0} plannedValue={point.durationMinutes} onCommit={(value) => onPatchPoint(point.id, { actualDurationMinutes: value })} /><InfoTile icon={Navigation} label="下一段交通" value={point.travelMinutesToNext ? `${point.travelMinutesToNext} 分钟` : '行程终点'} /></div>
+        <div className="grid grid-cols-2 gap-2 text-xs font-bold"><EditableStayTile value={point.actualDurationMinutes ?? 0} plannedValue={point.durationMinutes} onCommit={(value) => onPatchPoint(point.id, { actualDurationMinutes: value })} />{index < points.length - 1 ? <EditableTravelTile value={point.travelMinutesToNext} onCommit={(value) => onPatchPoint(point.id, { travelMinutesToNext: value })} /> : <InfoTile icon={Navigation} label="下一段交通" value="行程终点" />}</div>
         <section className="rounded-2xl border border-ink/10 p-3"><div className="mb-3 flex items-center justify-between"><strong className="text-sm">我的地点安排</strong><span className="rounded-full bg-jade/10 px-2 py-1 text-[10px] font-black text-jade">自动保存</span></div><div className="grid grid-cols-2 gap-2"><label className="text-[11px] font-black text-ink/50">安排日期<select value={point.day ?? 1} onChange={(event) => onPatchPoint(point.id, { day: Number(event.target.value) })} className="focus-ring mt-1 w-full rounded-xl border border-ink/10 bg-white px-2 py-2 text-sm font-bold text-ink">{Array.from({ length: maxDays }, (_, day) => <option key={day + 1} value={day + 1}>第{day + 1}天</option>)}</select></label><label className="text-[11px] font-black text-ink/50">计划停留<input type="number" min={10} max={480} step={5} value={point.durationMinutes} onChange={(event) => onPatchPoint(point.id, { durationMinutes: Math.max(10, Number(event.target.value) || 10) })} className="focus-ring mt-1 w-full rounded-xl border border-ink/10 px-2 py-2 text-sm font-bold text-ink" /></label></div><label className="mt-3 block text-[11px] font-black text-ink/50">我的安排<textarea value={notes[point.id] ?? ''} placeholder="例如：提前预约、重点拍摄坝体全景、为老人预留休息时间" onChange={(event) => onPatchNote(point.id, event.target.value)} rows={3} className="focus-ring mt-1 w-full resize-none rounded-xl border border-ink/10 px-3 py-2 text-sm font-medium text-ink" /></label></section>
-        <div className="flex justify-end"><a href={primaryDetail.url} target="_blank" rel="noreferrer" aria-label={`${point.name}${primaryDetail.ariaLabel}`} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white transition hover:bg-river">{primaryDetail.label}<ExternalLink className="h-3.5 w-3.5" /></a></div>
+        <div className="flex flex-wrap justify-end gap-2">{stationLinks?.timetableUrl && <a href={stationLinks.detailUrl} target="_blank" rel="noreferrer" aria-label={`${point.name}铁路站点介绍`} className="inline-flex shrink-0 items-center gap-1 rounded-full border border-ink/15 bg-white px-3 py-2 text-xs font-black text-ink transition hover:border-river hover:text-river">站点介绍<ExternalLink className="h-3.5 w-3.5" /></a>}<a href={stationLinks?.timetableUrl ?? primaryDetail.url} target="_blank" rel="noreferrer" aria-label={stationLinks?.timetableUrl ? `${point.name}12306到发车次` : `${point.name}${primaryDetail.ariaLabel}`} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white transition hover:bg-river">{stationLinks?.timetableUrl ? '12306 · 到发车次' : primaryDetail.label}<ExternalLink className="h-3.5 w-3.5" /></a></div>
       </div>}
     </article>; })}</div>;
 }
@@ -159,6 +159,7 @@ type PointServiceLinkSet = {
   kind: 'railway' | 'attraction';
   amapUrl: string;
   detailUrl?: string;
+  timetableUrl?: string;
   bookingUrl: string;
 };
 
@@ -240,7 +241,7 @@ export function getVerifiedCtripDetailUrl(point: Pick<RoutePoint, 'name' | 'type
   return isDirectCtripDetailUrl(alias) ? alias : undefined;
 }
 
-export function getPointServiceLinks(point: Pick<RoutePoint, 'name' | 'city' | 'type'> & Partial<Pick<RoutePoint, 'lat' | 'lng'>>): PointServiceLinkSet {
+export function getPointServiceLinks(point: Pick<RoutePoint, 'name' | 'city' | 'type'> & Partial<Pick<RoutePoint, 'lat' | 'lng'>>, date?: string): PointServiceLinkSet {
   const keyword = encodeURIComponent(`${point.city} ${point.name}`);
   const isRailwayStation = point.type === 'start' && /(?:站|高铁站|火车站)$/.test(point.name.trim());
   const ctripTicketSearchUrl = `https://m.ctrip.com/webapp/ticket/index.html#/dest/k-keyword-0/s-tickets?keyword=${keyword}`;
@@ -253,10 +254,24 @@ export function getPointServiceLinks(point: Pick<RoutePoint, 'name' | 'city' | '
     detailUrl: isRailwayStation
       ? 'https://kyfw.12306.cn/mormhweb/czyd_2143/'
       : getVerifiedCtripDetailUrl(point),
+    ...(isRailwayStation ? { timetableUrl: getRailwayStationTimetableUrl(point.name, date) } : {}),
     bookingUrl: isRailwayStation
       ? 'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc'
       : ctripTicketSearchUrl,
   };
+}
+
+const RAILWAY_STATION_CODES: Readonly<Record<string, string>> = {
+  武汉站: 'WHN', 宜昌东站: 'HAN', 恩施站: 'ESN', 荆州站: 'JBN', 襄阳东站: 'EKN', 黄石北站: 'KSN',
+};
+
+export function getRailwayStationTimetableUrl(stationName: string, date?: string) {
+  const name = stationName.trim();
+  const stationCode = RAILWAY_STATION_CODES[name];
+  if (!stationCode) return 'https://kyfw.12306.cn/otn/czxx/init';
+  const queryDate = /^\d{4}-\d{2}-\d{2}$/.test(date ?? '') ? date! : new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const params = new URLSearchParams({ date: queryDate, station_code: stationCode, station_name: name });
+  return `https://kyfw.12306.cn/otn/czxx/init?${params}`;
 }
 
 export function getPointPrimaryDetailLink(point: Pick<RoutePoint, 'name' | 'city' | 'type'> & Partial<Pick<RoutePoint, 'lat' | 'lng'>>): PointPrimaryDetailLink {
@@ -284,6 +299,12 @@ export function compactTravelTip(value: string, fallback: string, maxLength = 30
 }
 
 function InfoTile({ icon: Icon, label, value }: { icon: typeof Clock3; label: string; value: string }) { return <div className="rounded-2xl bg-ink/[0.045] p-3"><Icon className="mb-2 h-4 w-4 text-river" /><span className="block text-[10px] text-ink/45">{label}</span><strong className="mt-0.5 block text-ink">{value}</strong></div>; }
+function EditableTravelTile({ value, onCommit }: { value: number; onCommit: (value: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+  const commit = () => { const next = normalizeTravelMinutes(draft); setDraft(String(next)); onCommit(next); };
+  return <label className="rounded-2xl bg-ink/[0.045] p-3 transition focus-within:bg-river/10 focus-within:ring-2 focus-within:ring-river/20"><Navigation className="mb-2 h-4 w-4 text-river" /><span className="block text-[10px] text-ink/45">下一段交通</span><span className="mt-0.5 flex items-baseline gap-1 text-ink"><input aria-label="下一段交通分钟" type="number" min={0} max={1440} step={1} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} className="focus-ring min-w-0 w-full bg-transparent text-base font-black text-ink" /><span className="text-[11px] font-black">分钟</span></span><span className="mt-1 block text-[9px] font-bold text-ink/35">可按实际交通修改</span></label>;
+}
 function EditableStayTile({ value, plannedValue, onCommit }: { value: number; plannedValue: number; onCommit: (value: number) => void }) {
   const [draft, setDraft] = useState(String(value));
   useEffect(() => setDraft(String(value)), [value]);
@@ -291,6 +312,29 @@ function EditableStayTile({ value, plannedValue, onCommit }: { value: number; pl
   return <label className="rounded-2xl bg-ink/[0.045] p-3 transition focus-within:bg-jade/10 focus-within:ring-2 focus-within:ring-jade/20"><Clock3 className="mb-2 h-4 w-4 text-river" /><span className="block text-[10px] text-ink/45">实际停留</span><span className="mt-0.5 flex items-baseline gap-1 text-ink"><input aria-label="实际停留分钟" type="number" min={0} max={1440} step={1} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} className="focus-ring min-w-0 w-full bg-transparent text-base font-black text-ink" /><span className="text-[11px] font-black">分钟</span></span><span className="mt-1 block text-[9px] font-bold text-ink/35">计划 {plannedValue} 分钟</span></label>;
 }
 function formatCompactDate(value?: string) { if (!value) return '日期待定'; return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', weekday: 'short' }).format(parseLocalDate(value)); }
+
+export function normalizeTravelMinutes(value: string | number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.min(1440, Math.max(0, Math.round(parsed)));
+}
+
+export function recalculateEditableTimeline(points: PlannedRoutePoint[], departureTime: string): PlannedRoutePoint[] {
+  const [hours, minutes] = departureTime.split(':').map(Number);
+  let cursor = (Number.isFinite(hours) ? hours : 8) * 60 + (Number.isFinite(minutes) ? minutes : 30) + 15;
+  return points.map((point) => {
+    const durationMinutes = Math.max(10, Math.round(Number(point.durationMinutes) || 10));
+    const travelMinutesToNext = normalizeTravelMinutes(point.travelMinutesToNext);
+    const arrivalTime = formatTimelineClock(cursor);
+    cursor += durationMinutes + travelMinutesToNext;
+    return { ...point, time: arrivalTime, arrivalTime, stayMinutes: durationMinutes, durationMinutes, travelMinutesToNext };
+  });
+}
+
+function formatTimelineClock(totalMinutes: number) {
+  const normalized = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`;
+}
 
 function Days({ plan, entries, onPatch, onEntries, onNotify }: { plan: NonNullable<ReturnType<typeof useTrip>['plan']>; entries: JournalEntry[]; onPatch: ReturnType<typeof useTrip>['patchPlan']; onEntries: (entries: JournalEntry[]) => void; onNotify: ReturnType<typeof useTrip>['notify'] }) {
   const [editingId, setEditingId] = useState<string | null>(null);
