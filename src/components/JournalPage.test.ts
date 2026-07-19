@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCompletedJournalEntries, buildJournalMapRoute, buildJournalPosterSvg, layoutJournalPosterPoints } from './JournalPage';
+import { buildCompletedJournalEntries, buildJournalGuideCards, buildJournalMapRoute, buildJournalPosterSvg, getJournalAmapUrl, getJournalXiaohongshuUrl, layoutJournalPosterPoints } from './JournalPage';
 import type { JournalEntry } from '../types/route';
 import { defaultTripRequest, generateTripPlan } from '../domain/trip';
 
@@ -61,5 +61,16 @@ describe('journal handwritten route poster', () => {
   it('embeds an already inlined local photo in its own journal card', () => {
     const svg = buildJournalPosterSvg([{ ...entry('1', '武汉站'), photoUrl: 'data:image/png;base64,AA==' }], 'real');
     expect(svg).toContain('<image href="data:image/png;base64,AA=="');
+  });
+
+  it('builds exact external place links and factual guide cards for itinerary details', () => {
+    const point = generateTripPlan(defaultTripRequest('武汉')).route.points[1];
+    const xiaohongshu = new URL(getJournalXiaohongshuUrl(point));
+    const amap = new URL(getJournalAmapUrl(point));
+
+    expect(xiaohongshu.hostname).toBe('www.xiaohongshu.com');
+    expect(xiaohongshu.searchParams.get('keyword')).toBe(`${point.city} ${point.name} 游玩攻略`);
+    expect(amap.searchParams.get('position')).toBe(`${point.lng},${point.lat}`);
+    expect(buildJournalGuideCards(point).map((card) => card.text)).toEqual([point.reason, point.photoTip, point.recordTip]);
   });
 });

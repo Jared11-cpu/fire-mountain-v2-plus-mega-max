@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchPointCover, getCuratedPointCover } from './pointImageService';
+import { fetchPointCover, fetchPointGallery, getCuratedPointCover } from './pointImageService';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -40,5 +40,14 @@ describe('pointImageService', () => {
     const cover = await fetchPointCover('宜昌', '小众地点', undefined, { lng: 111.05, lat: 30.82 });
     expect(cover).toMatchObject({ imageUrl: 'https://aos-comment.amap.com/nearby.jpg' });
     expect(cover?.imageCredit.author).toContain('附近实景');
+  });
+
+  it('returns several distinct exact-place photos for a journal detail gallery', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [{ name: '龟山风景区', location: { lng: 114.27, lat: 30.56 }, photos: ['http://a.test/one.jpg', 'https://a.test/two.jpg', 'https://a.test/two.jpg'] }] }), { status: 200 })));
+
+    const gallery = await fetchPointGallery('武汉', '龟山风景区');
+
+    expect(gallery.map((item) => item.imageUrl)).toEqual(['https://a.test/one.jpg', 'https://a.test/two.jpg']);
+    expect(gallery.every((item) => decodeURIComponent(item.imageCredit.sourceUrl).includes('龟山风景区'))).toBe(true);
   });
 });

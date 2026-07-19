@@ -75,31 +75,36 @@ export async function fetchPointCover(city: string, pointName: string, signal?: 
 }
 
 async function fetchAmapPointCover(city: string, pointName: string, signal?: AbortSignal, location?: { lng: number; lat: number }): Promise<PointCover | undefined> {
+  return (await fetchPointGallery(city, pointName, signal, location, 1))[0];
+}
+
+export async function fetchPointGallery(city: string, pointName: string, signal?: AbortSignal, location?: { lng: number; lat: number }, limit = 4): Promise<PointCover[]> {
   const exactParams = new URLSearchParams({ city, keywords: pointName, pageSize: '10', allTypes: '1' });
   const exactRows = await fetchAmapPhotoRows(exactParams, signal);
-  let selected = selectAmapPhoto(exactRows, pointName);
+  let selectedRows = selectAmapPhotos(exactRows, pointName);
   let nearby = false;
 
-  if (!selected && location && Number.isFinite(location.lng) && Number.isFinite(location.lat)) {
+  if (!selectedRows.length && location && Number.isFinite(location.lng) && Number.isFinite(location.lat)) {
     const nearbyParams = new URLSearchParams({ city, keywords: '景点', pageSize: '25', location: `${location.lng},${location.lat}` });
     const nearbyRows = await fetchAmapPhotoRows(nearbyParams, signal);
-    selected = selectStableNearbyPhoto(nearbyRows, pointName);
-    nearby = Boolean(selected);
+    selectedRows = selectStableNearbyPhotos(nearbyRows, pointName);
+    nearby = selectedRows.length > 0;
   }
 
-  const imageUrl = securePhotoUrl(selected?.photos?.find(Boolean));
-  if (!selected || !imageUrl) return undefined;
-  const markerName = selected.name || pointName;
-  const markerLocation = selected.location && Number.isFinite(selected.location.lng) && Number.isFinite(selected.location.lat)
-    ? `position=${selected.location.lng},${selected.location.lat}&` : '';
-  return {
-    imageUrl,
-    imageCredit: {
-      author: nearby ? `高德地图 · ${markerName}附近实景` : '高德地图地点相册',
-      license: '来源与使用规则见地点页',
-      sourceUrl: `https://uri.amap.com/marker?${markerLocation}name=${encodeURIComponent(markerName)}`,
-    },
-  };
+  const seen = new Set<string>();
+  return selectedRows.flatMap((selected) => {
+    const markerName = selected.name || pointName;
+    const markerLocation = selected.location && Number.isFinite(selected.location.lng) && Number.isFinite(selected.location.lat)
+      ? `position=${selected.location.lng},${selected.location.lat}&` : '';
+    return (selected.photos ?? []).map(securePhotoUrl).filter((imageUrl): imageUrl is string => Boolean(imageUrl)).map((imageUrl) => ({
+      imageUrl,
+      imageCredit: {
+        author: nearby ? `高德地图 · ${markerName}附近实景` : '高德地图地点相册',
+        license: '来源与使用规则见地点页',
+        sourceUrl: `https://uri.amap.com/marker?${markerLocation}name=${encodeURIComponent(markerName)}`,
+      },
+    }));
+  }).filter((cover) => { if (seen.has(cover.imageUrl)) return false; seen.add(cover.imageUrl); return true; }).slice(0, Math.max(1, limit));
 }
 
 async function fetchAmapPhotoRows(params: URLSearchParams, signal?: AbortSignal) {
@@ -109,20 +114,19 @@ async function fetchAmapPhotoRows(params: URLSearchParams, signal?: AbortSignal)
   return Array.isArray(payload.items) ? payload.items : [];
 }
 
-function selectAmapPhoto(rows: AmapPhotoPoi[], pointName: string) {
+function selectAmapPhotos(rows: AmapPhotoPoi[], pointName: string) {
   const needle = normalizePlaceName(pointName);
-  const matching = rows.filter((row) => {
+  return rows.filter((row) => {
     const name = normalizePlaceName(row.name || '');
     return Boolean(name) && (name === needle || name.includes(needle) || needle.includes(name));
-  });
-  return matching.find((row) => row.photos?.some(Boolean));
+  }).filter((row) => row.photos?.some(Boolean));
 }
 
-function selectStableNearbyPhoto(rows: AmapPhotoPoi[], pointName: string) {
+function selectStableNearbyPhotos(rows: AmapPhotoPoi[], pointName: string) {
   const candidates = rows.filter((row) => row.photos?.some(Boolean));
-  if (!candidates.length) return undefined;
+  if (!candidates.length) return [];
   const hash = [...pointName].reduce((sum, char) => (sum * 31 + (char.codePointAt(0) || 0)) >>> 0, 0);
-  return candidates[hash % candidates.length];
+  return [...candidates.slice(hash % candidates.length), ...candidates.slice(0, hash % candidates.length)];
 }
 
 function normalizePlaceName(value: string) {

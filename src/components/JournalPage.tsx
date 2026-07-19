@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, BookOpen, Camera, Download, ImagePlus, Loader2, MapPin, Pencil, Route as RouteIcon, Save, Trash2, UploadCloud, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, Camera, Clock3, Compass, Download, ExternalLink, ImagePlus, Loader2, MapPin, MessageCircle, Navigation, Pencil, Route as RouteIcon, Save, Sparkles, Star, Timer, Trash2, UploadCloud, X } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { cities, type CityName } from '../data/mockData';
 import { parseLocalDate, type TripPlan } from '../domain/trip';
 import { clearJournal, compressPhoto, deletePhoto, loadPhoto, savePhoto } from '../services/journalStorage';
+import { fetchPointGallery, getCuratedPointCover, type PointCover } from '../services/pointImageService';
 import { useTrip } from '../state/tripStore';
 import type { JournalEntry, RoutePoint, SmartRoute } from '../types/route';
 import { RouteMap } from './RouteMap';
@@ -156,10 +157,15 @@ export function JournalPage() {
     } finally { setExportingPoster(false); }
   };
 
-  if (entryId) return <JournalDetail entry={entries.find((entry) => entry.id === entryId)} photoUrls={photoUrls} onBack={() => navigate('/journal')} onSave={(updated) => setJournalEntries(entries.map((item) => item.id === updated.id ? updated : item))} onDelete={async (entry) => { await removeEntry(entry); navigate('/journal'); }} notify={notify} />;
+  if (entryId) {
+    const exampleEntry = exampleMapEntries.find((entry) => entry.id === entryId);
+    const examplePoint = exampleEntry && examplePoints.find((point) => point.id === exampleEntry.pointId);
+    if (exampleEntry && examplePoint) return <JournalPlaceDetail entry={exampleEntry} point={examplePoint} onBack={() => navigate('/journal')} />;
+    return <JournalDetail entry={entries.find((entry) => entry.id === entryId)} photoUrls={photoUrls} onBack={() => navigate('/journal')} onSave={(updated) => setJournalEntries(entries.map((item) => item.id === updated.id ? updated : item))} onDelete={async (entry) => { await removeEntry(entry); navigate('/journal'); }} notify={notify} />;
+  }
 
   return <main aria-label="旅行手账地图" className="relative h-[calc(100vh-10.25rem)] min-h-[690px] overflow-hidden bg-[#d8eee8]">
-    <JournalRouteMap entries={visibleEntries} mode={mode} sourceRoute={plan?.route} onOpen={(id) => mode === 'real' && navigate(`/journal/${id}`)} />
+    <JournalRouteMap entries={visibleEntries} mode={mode} sourceRoute={plan?.route} onOpen={(id) => navigate(`/journal/${id}`)} />
 
     <section className="pointer-events-none absolute left-4 right-4 top-4 z-50 flex items-start justify-between gap-4">
       <div className="pointer-events-auto max-w-[min(640px,calc(100vw-2rem))] rounded-[1.4rem] border border-white/65 bg-white/88 p-3 shadow-[0_18px_55px_rgba(18,34,42,.2)] backdrop-blur-xl md:p-4">
@@ -186,9 +192,77 @@ function JournalRouteMap({ entries, mode, sourceRoute, onOpen }: { entries: Jour
   if (!route) return <div className="grid h-full min-h-[690px] place-items-center bg-[#e3eee9]"><div className="rounded-3xl bg-white/90 px-8 py-7 text-center text-ink/45 shadow-xl backdrop-blur"><MapPin className="mx-auto h-10 w-10 text-river/45" /><p className="mt-3 font-black">{mode === 'real' ? '还没有已完成景点，请先在 AI 行程的“每日记录”中完成一站。' : '请先生成一条行程路线。'}</p></div></div>;
 
   return <div className="relative h-full min-h-[690px] overflow-hidden bg-white">
-    <RouteMap route={route} selectedPointId={selectedId} activePointIndex={selectedIndex} navigating={false} journalCards={orderedEntries.map(({ id, note, photoUrl }) => ({ id, note, photoUrl }))} onSelectPoint={(point) => { setSelectedId(point.id); if (mode === 'real') onOpen(point.id); }} mapOnly />
-    <div className="pointer-events-none absolute bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-full bg-ink/88 px-4 py-2 text-[11px] font-black text-white shadow-lg backdrop-blur">{mode === 'real' ? '点击地点卡片翻开并编辑完整手账' : '示例路线仅供查看'} · {orderedEntries.length} 站</div>
+    <RouteMap route={route} selectedPointId={selectedId} activePointIndex={selectedIndex} navigating={false} journalCards={orderedEntries.map(({ id, note, photoUrl }) => ({ id, note, photoUrl }))} onSelectPoint={(point) => { setSelectedId(point.id); onOpen(point.id); }} mapOnly />
+    <div className="pointer-events-none absolute bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-full bg-ink/88 px-4 py-2 text-[11px] font-black text-white shadow-lg backdrop-blur">{mode === 'real' ? '点击地点卡片翻开并编辑完整手账' : '点击地点卡片查看实景、攻略与社区内容'} · {orderedEntries.length} 站</div>
   </div>;
+}
+
+export function getJournalXiaohongshuUrl(point: Pick<RoutePoint, 'city' | 'name'>) {
+  const params = new URLSearchParams({ keyword: `${point.city} ${point.name} 游玩攻略`, source: 'web_search_result_notes' });
+  return `https://www.xiaohongshu.com/search_result?${params}`;
+}
+
+export function getJournalAmapUrl(point: Pick<RoutePoint, 'name' | 'lat' | 'lng'>) {
+  return `https://uri.amap.com/marker?position=${point.lng},${point.lat}&name=${encodeURIComponent(point.name)}`;
+}
+
+export function buildJournalGuideCards(point: Pick<RoutePoint, 'reason' | 'photoTip' | 'recordTip'>) {
+  return [
+    { eyebrow: 'WHY HERE', title: '为什么值得去', text: point.reason },
+    { eyebrow: 'PHOTO NOTE', title: '怎么拍更出片', text: point.photoTip },
+    { eyebrow: 'TRAVEL NOTE', title: '现场记录什么', text: point.recordTip },
+  ];
+}
+
+function JournalPlaceDetail({ entry, point, onBack }: { entry: JournalMapEntry; point: RoutePoint; onBack: () => void }) {
+  const curated = getCuratedPointCover(point.name);
+  const initialCover = point.imageUrl ? { imageUrl: point.imageUrl, imageCredit: point.imageCredit ?? curated?.imageCredit ?? { author: '行程地点图片', license: '来源与使用规则见原始页面', sourceUrl: getJournalAmapUrl(point) } } : curated;
+  const [gallery, setGallery] = useState<PointCover[]>(initialCover ? [initialCover] : []);
+  const [galleryLoading, setGalleryLoading] = useState(true);
+  useEffect(() => {
+    const controller = new AbortController();
+    setGalleryLoading(true);
+    fetchPointGallery(point.city, point.name, controller.signal, { lng: point.lng, lat: point.lat }, 3).then((covers) => {
+      setGallery((current) => [...current, ...covers].filter((cover, index, rows) => rows.findIndex((item) => item.imageUrl === cover.imageUrl) === index).slice(0, 3));
+    }).catch((error) => { if (!(error instanceof DOMException && error.name === 'AbortError')) console.error('Journal place gallery failed', error); }).finally(() => { if (!controller.signal.aborted) setGalleryLoading(false); });
+    return () => controller.abort();
+  }, [point.city, point.lat, point.lng, point.name]);
+  const xiaohongshuUrl = getJournalXiaohongshuUrl(point);
+  const amapUrl = getJournalAmapUrl(point);
+  const guideCards = buildJournalGuideCards(point);
+  const reviewFocus = point.type === 'food' ? ['排队时长', '人均价格', '招牌口味'] : point.type === 'scenic' || point.type === 'photo' ? ['最佳机位', '步行强度', '高峰拥挤度'] : ['交通衔接', '现场指引', '停留体验'];
+  const typeLabel = ({ start: '路线起点', scenic: '人文景点', food: '美食地点', photo: '摄影地点', rest: '休息补给', hotel: '住宿地点', end: '路线终点' } as const)[point.type];
+
+  return <main className="min-h-screen bg-[#e9e2d3] px-4 py-8 md:px-8 md:py-12">
+    <div className="mx-auto max-w-7xl">
+      <button type="button" onClick={onBack} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-ink/10 bg-[#fffaf0]/90 px-5 text-sm font-black text-ink shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"><ArrowLeft className="h-4 w-4"/>返回旅行手账地图</button>
+      <article className="relative mt-5 overflow-hidden rounded-[2.5rem] border border-ink/10 bg-[#fffaf0] shadow-[0_35px_100px_rgba(18,34,42,.18)]">
+        <div className="pointer-events-none absolute inset-0 opacity-40 [background-image:linear-gradient(rgba(14,107,114,.06)_1px,transparent_1px),linear-gradient(90deg,rgba(14,107,114,.06)_1px,transparent_1px)] [background-size:42px_42px]"/>
+        <section className="relative grid lg:grid-cols-[1.34fr_.66fr]">
+          <div className="grid min-h-[430px] grid-cols-3 grid-rows-2 gap-2 bg-ink/5 p-2 md:min-h-[600px]">
+            {gallery.length ? gallery.map((cover, index) => <a key={cover.imageUrl} href={cover.imageCredit.sourceUrl} target="_blank" rel="noreferrer" className={`group relative overflow-hidden ${gallery.length === 1 ? 'col-span-3 row-span-2 rounded-l-[2rem]' : index === 0 ? 'col-span-2 row-span-2 rounded-l-[2rem]' : gallery.length === 2 ? 'row-span-2 rounded-r-[1rem]' : 'rounded-r-[1rem]'}`}><img src={cover.imageUrl} alt={`${point.name}地点实景${index + 1}`} className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.035]"/><span className="absolute inset-x-3 bottom-3 rounded-xl bg-black/60 px-3 py-2 text-[10px] font-bold text-white/85 opacity-0 backdrop-blur transition group-hover:opacity-100">{cover.imageCredit.author} · {cover.imageCredit.license}</span></a>) : <div className="col-span-3 row-span-2 grid place-items-center bg-gradient-to-br from-river/15 via-[#f5dfaa] to-tower/20 text-center"><div><Camera className="mx-auto h-12 w-12 text-river/45"/><p className="mt-3 font-black text-ink/45">{galleryLoading ? '正在寻找这一站的地点实景' : '暂未找到可授权展示的地点实景'}</p></div></div>}
+            {galleryLoading && <div className="absolute left-6 top-6 inline-flex items-center gap-2 rounded-full bg-white/85 px-3 py-2 text-xs font-black text-river shadow-sm backdrop-blur"><Loader2 className="h-4 w-4 animate-spin"/>更新地点实景</div>}
+          </div>
+          <div className="relative flex flex-col justify-between p-7 md:p-10 lg:p-12">
+            <div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-river px-3 py-1.5 text-[11px] font-black text-white">DAY {point.day ?? entry.day} · STOP</span><span className="rounded-full border border-tower/25 bg-tower/10 px-3 py-1.5 text-[11px] font-black text-tower">{typeLabel}</span></div><p className="mt-8 text-xs font-black tracking-[.28em] text-river">MY HUBEI PLACE NOTE</p><h1 className="journal-handwriting mt-3 text-5xl font-black leading-[1.08] text-ink md:text-7xl">{point.name}</h1><p className="mt-6 text-base font-semibold leading-8 text-ink/60">{point.reason}</p></div>
+            <div className="mt-10 grid grid-cols-3 gap-2"><DetailMetric icon={Clock3} label="建议到达" value={point.time}/><DetailMetric icon={Timer} label="建议停留" value={`${point.stayMinutes} 分钟`}/><DetailMetric icon={MapPin} label="所在城市" value={point.city}/></div>
+          </div>
+        </section>
+
+        <section className="relative grid gap-8 border-t border-ink/10 p-7 md:p-10 lg:grid-cols-[1.45fr_.55fr] lg:p-12">
+          <div><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-black tracking-[.22em] text-tower">FIELD GUIDE</p><h2 className="font-display mt-2 text-3xl font-black md:text-4xl">这一站的实用攻略</h2></div><span className="rounded-full bg-river/[.08] px-3 py-2 text-[10px] font-black text-river"><Sparkles className="mr-1 inline h-3.5 w-3.5"/>AI / 行程资料整理 · 非社区原文</span></div><div className="mt-6 grid gap-4 md:grid-cols-3">{guideCards.map((card, index) => <section key={card.eyebrow} className={`min-h-52 rounded-[1.6rem] border border-ink/10 p-5 ${index === 1 ? 'bg-[#dceee5]' : index === 2 ? 'bg-[#f4d8cf]' : 'bg-[#f6e7be]'}`}><span className="text-[10px] font-black tracking-[.18em] text-river">{card.eyebrow}</span><h3 className="mt-3 text-xl font-black text-ink">{card.title}</h3><p className="mt-4 text-sm font-semibold leading-7 text-ink/65">{card.text}</p></section>)}</div></div>
+
+          <aside className="overflow-hidden rounded-[1.8rem] bg-[#172a31] text-white shadow-xl"><div className="p-6"><div className="flex items-center gap-2 text-[#ff6d81]"><MessageCircle className="h-5 w-5"/><span className="text-xs font-black tracking-[.18em]">小红书实拍与攻略</span></div><h2 className="mt-4 text-2xl font-black leading-tight">查看 {point.name} 的实时笔记与真实评论</h2><p className="mt-3 text-sm font-semibold leading-6 text-white/60">本站不复制社区原图、笔记或评论。点击后直接进入该地点的小红书搜索页，内容更新更及时。</p><div className="mt-5 border-t border-white/10 pt-4"><span className="text-[10px] font-black text-white/40">看评论时重点关注</span><div className="mt-3 flex flex-wrap gap-2">{reviewFocus.map((item) => <span key={item} className="inline-flex items-center gap-1 rounded-full bg-white/10 px-3 py-2 text-xs font-black"><Star className="h-3 w-3 fill-[#ff6d81] text-[#ff6d81]"/>{item}</span>)}</div></div></div><a href={xiaohongshuUrl} target="_blank" rel="noreferrer" className="flex min-h-16 items-center justify-between bg-[#ff2442] px-6 font-black transition hover:bg-[#e91f3a]">去小红书看实拍攻略<ExternalLink className="h-5 w-5"/></a></aside>
+        </section>
+
+        <footer className="relative flex flex-wrap items-center justify-between gap-4 border-t border-ink/10 bg-white/55 px-7 py-6 md:px-12"><div><p className="text-xs font-black text-ink/40">开放时间、票价及社区内容可能变化，请出发前再次核验。</p>{point.openingHours && <p className="mt-1 text-sm font-black text-ink/65">参考开放时间：{point.openingHours}</p>}</div><div className="flex flex-wrap gap-2"><a href={amapUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-full border border-river/20 bg-river/[.07] px-5 text-sm font-black text-river"><Navigation className="h-4 w-4"/>高德地点地图<ExternalLink className="h-3.5 w-3.5"/></a><a href={xiaohongshuUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-full bg-[#ff2442] px-5 text-sm font-black text-white"><Compass className="h-4 w-4"/>更多攻略与评论<ExternalLink className="h-3.5 w-3.5"/></a></div></footer>
+      </article>
+    </div>
+  </main>;
+}
+
+function DetailMetric({ icon: Icon, label, value }: { icon: typeof Clock3; label: string; value: string }) {
+  return <div className="rounded-2xl border border-ink/10 bg-white/70 p-3"><Icon className="h-4 w-4 text-river"/><span className="mt-2 block text-[10px] font-black text-ink/40">{label}</span><strong className="mt-1 block text-sm text-ink">{value}</strong></div>;
 }
 
 function orderJournalEntries(entries: JournalMapEntry[], sourceRoute?: SmartRoute) {
