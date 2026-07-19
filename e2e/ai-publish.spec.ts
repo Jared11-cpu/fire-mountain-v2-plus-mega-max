@@ -40,6 +40,7 @@ test('publishes only the final AI and AMap plan', async ({ page }) => {
   await expect(page.getByText('站点介绍')).toHaveCount(0);
 
   await page.getByRole('tab', { name: '交通' }).click();
+  await page.getByRole('radio', { name: '公交 / 地铁交通方式' }).click();
   await expect(page.getByText('规则引擎交通方案')).toHaveCount(0);
   const preferenceGroup = page.getByRole('radiogroup', { name: '公共交通路线偏好' });
   await expect(preferenceGroup).toBeVisible();

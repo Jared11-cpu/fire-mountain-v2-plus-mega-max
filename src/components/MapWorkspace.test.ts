@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { baseRoutes } from '../data/routeData';
-import type { TransportPlanResponse } from '../services/transportService';
-import { compactTravelTip, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointDetailLinks, getPointPrimaryDetailLink, getPointServiceLinks, getRailwayStationTimetableUrl, getVerifiedCtripDetailUrl, getXiaohongshuGuideUrl, isDirectCtripDetailUrl, normalizeActualStayMinutes, normalizeTravelMinutes, recalculateEditableTimeline } from './MapWorkspace';
+import type { TransportPlanResponse, TransportSegment } from '../services/transportService';
+import { compactTravelTip, formatTransportDistance, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointDetailLinks, getPointPrimaryDetailLink, getPointServiceLinks, getRailwayStationTimetableUrl, getTransportLegPreview, getTransportSegmentAriaLabel, getVerifiedCtripDetailUrl, getXiaohongshuGuideUrl, isDirectCtripDetailUrl, normalizeActualStayMinutes, normalizeTravelMinutes, recalculateEditableTimeline } from './MapWorkspace';
 import { getFocusedTransportPath, getFocusedTransportSegmentPoints } from './RouteMap';
 
 describe('getPointServiceLinks', () => {
@@ -161,6 +161,23 @@ describe('editable next-leg transport', () => {
 
     expect(result.map((point) => point.arrivalTime)).toEqual(['08:45', '09:25', '09:50']);
     expect(result[0].travelMinutesToNext).toBe(30);
+  });
+});
+
+describe('AMap-style transport segment summaries', () => {
+  it('formats walking distance in meters and named transit with stops', () => {
+    expect(formatTransportDistance(0.42)).toBe('420 米');
+    expect(getTransportLegPreview({ id: 'walk', mode: 'walk', viaStops: [], durationMinutes: 6, distanceKm: 0.42, polyline: [] })).toEqual({ headline: '步行 420 米', detail: '约 6 分钟', meta: '' });
+    expect(getTransportLegPreview({ id: 'subway', mode: 'subway', lineName: '地铁2号线', departureStop: '武汉站东广场', arrivalStop: '洪山广场', entrance: 'A口', exit: 'C口', viaStops: ['杨春湖', '武汉火车站'], durationMinutes: 18, distanceKm: 9.6, fare: 4, polyline: [] })).toEqual({ headline: '地铁2号线', detail: 'A口进站 · 武汉站东广场上车 → 洪山广场下车 · C口出站', meta: '途经 2 站' });
+  });
+
+  it('does not invent a bus number when dynamic route details are unavailable', () => {
+    expect(getTransportLegPreview({ id: 'estimate', mode: 'bus', viaStops: [], durationMinutes: 12, distanceKm: 2.8, polyline: [] })).toEqual({ headline: '公交线路待动态查询', detail: '上下车站待动态查询', meta: '12 分钟' });
+  });
+
+  it('includes time, route, and fare in the accessible card label', () => {
+    const segment: TransportSegment = { id: 'segment', from: '武汉站', to: '武汉东湖', departureTime: '08:55', arrivalTime: '09:22', durationMinutes: 27, distanceKm: 10, mode: '地铁', costEstimate: '¥4', instruction: '', legs: [{ id: 'line', mode: 'subway', lineName: '地铁2号线', viaStops: [], durationMinutes: 18, distanceKm: 9.6, polyline: [] }] };
+    expect(getTransportSegmentAriaLabel(segment, 0, false)).toContain('08:55 出发，09:22 到达；地铁2号线；费用 ¥4');
   });
 });
 
