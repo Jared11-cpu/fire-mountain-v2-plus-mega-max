@@ -157,7 +157,7 @@ export function TripProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'save', status: 'saved' });
       } catch {
         dispatch({ type: 'save', status: 'error' });
-        notify('自动保存失败，请检查浏览器存储空间。', 'error');
+        notify('保存失败，请检查浏览器存储空间。', 'error');
       }
     }, 400);
     return () => window.clearTimeout(timer);

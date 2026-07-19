@@ -26,6 +26,7 @@ test('publishes only the final AI and AMap plan', async ({ page }) => {
   await expect(page.getByText('最终千问分析：路线包含用户指定的武汉长江大桥。')).toBeVisible();
 
   await page.getByRole('tab', { name: '路线' }).click();
+  await expect(page.getByText('自动保存')).toHaveCount(0);
   const transportMinutes = page.getByLabel('下一段交通分钟').first();
   await transportMinutes.fill('30');
   await transportMinutes.press('Enter');
