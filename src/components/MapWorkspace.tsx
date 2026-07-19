@@ -140,7 +140,7 @@ function Stops({ points, selectedId, fallbackImageUrl, dailyRecords, maxDays, on
       .catch(() => undefined);
     return () => controller.abort();
   }, [coverQueryKey]);
-  return <div className="space-y-4"><h4 className="font-display text-2xl font-black">地点安排</h4>{points.map((point, index) => { const expanded = expandedId === point.id; const date = dailyRecords.find((record) => record.day === (point.day ?? 1))?.date; const primaryDetail = getPointPrimaryDetailLink(point); const stationLinks = point.type === 'start' ? getPointServiceLinks(point, date) : null; const resolvedCover = getCuratedPointCover(point.name) ?? fetchedCovers[point.id]; const coverUrl = resolvedCover?.imageUrl ?? point.imageUrl ?? fallbackImageUrl; return <article key={point.id} className={`overflow-hidden rounded-[1.65rem] border bg-white transition ${selectedId === point.id ? 'border-river shadow-[0_12px_35px_rgba(14,116,128,.14)]' : 'border-ink/10 shadow-sm'}`}>
+  return <div className="space-y-4"><h4 className="font-display text-2xl font-black">地点安排</h4>{points.map((point, index) => { const expanded = expandedId === point.id; const date = dailyRecords.find((record) => record.day === (point.day ?? 1))?.date; const primaryDetail = getPointPrimaryDetailLink(point, date); const resolvedCover = getCuratedPointCover(point.name) ?? fetchedCovers[point.id]; const coverUrl = resolvedCover?.imageUrl ?? point.imageUrl ?? fallbackImageUrl; return <article key={point.id} className={`overflow-hidden rounded-[1.65rem] border bg-white transition ${selectedId === point.id ? 'border-river shadow-[0_12px_35px_rgba(14,116,128,.14)]' : 'border-ink/10 shadow-sm'}`}>
       <button type="button" aria-expanded={expanded} onClick={() => { setExpandedId(expanded ? null : point.id); onSelect(point); }} className="group relative block h-36 w-full overflow-hidden text-left">
         <img src={coverUrl} alt={`${point.name}风景封面`} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.035]" />
         <span className="absolute inset-0 bg-gradient-to-t from-ink/95 via-ink/20 to-transparent" />
@@ -150,7 +150,7 @@ function Stops({ points, selectedId, fallbackImageUrl, dailyRecords, maxDays, on
       {expanded && <div className="space-y-4 p-4">
         <div className="grid grid-cols-2 gap-2 text-xs font-bold"><EditableStayTile value={point.actualDurationMinutes ?? 0} plannedValue={point.durationMinutes} onCommit={(value) => onPatchPoint(point.id, { actualDurationMinutes: value })} />{index < points.length - 1 ? <EditableTravelTile value={point.travelMinutesToNext} onCommit={(value) => onPatchPoint(point.id, { travelMinutesToNext: value })} /> : <InfoTile icon={Navigation} label="下一段交通" value="行程终点" />}</div>
         <section className="rounded-2xl border border-ink/10 p-3"><div className="mb-3 flex items-center justify-between"><strong className="text-sm">我的地点安排</strong><span className="rounded-full bg-jade/10 px-2 py-1 text-[10px] font-black text-jade">自动保存</span></div><div className="grid grid-cols-2 gap-2"><label className="text-[11px] font-black text-ink/50">安排日期<select value={point.day ?? 1} onChange={(event) => onPatchPoint(point.id, { day: Number(event.target.value) })} className="focus-ring mt-1 w-full rounded-xl border border-ink/10 bg-white px-2 py-2 text-sm font-bold text-ink">{Array.from({ length: maxDays }, (_, day) => <option key={day + 1} value={day + 1}>第{day + 1}天</option>)}</select></label><label className="text-[11px] font-black text-ink/50">计划停留<input type="number" min={10} max={480} step={5} value={point.durationMinutes} onChange={(event) => onPatchPoint(point.id, { durationMinutes: Math.max(10, Number(event.target.value) || 10) })} className="focus-ring mt-1 w-full rounded-xl border border-ink/10 px-2 py-2 text-sm font-bold text-ink" /></label></div><label className="mt-3 block text-[11px] font-black text-ink/50">我的安排<textarea value={notes[point.id] ?? ''} placeholder="例如：提前预约、重点拍摄坝体全景、为老人预留休息时间" onChange={(event) => onPatchNote(point.id, event.target.value)} rows={3} className="focus-ring mt-1 w-full resize-none rounded-xl border border-ink/10 px-3 py-2 text-sm font-medium text-ink" /></label></section>
-        <div className="flex flex-wrap justify-end gap-2">{stationLinks?.timetableUrl && <a href={stationLinks.detailUrl} target="_blank" rel="noreferrer" aria-label={`${point.name}铁路站点介绍`} className="inline-flex shrink-0 items-center gap-1 rounded-full border border-ink/15 bg-white px-3 py-2 text-xs font-black text-ink transition hover:border-river hover:text-river">站点介绍<ExternalLink className="h-3.5 w-3.5" /></a>}<a href={stationLinks?.timetableUrl ?? primaryDetail.url} target="_blank" rel="noreferrer" aria-label={stationLinks?.timetableUrl ? `${point.name}12306到发车次` : `${point.name}${primaryDetail.ariaLabel}`} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white transition hover:bg-river">{stationLinks?.timetableUrl ? '12306 · 到发车次' : primaryDetail.label}<ExternalLink className="h-3.5 w-3.5" /></a></div>
+        <div className="flex justify-end"><a href={primaryDetail.url} target="_blank" rel="noreferrer" aria-label={`${point.name}${primaryDetail.ariaLabel}`} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white transition hover:bg-river">{primaryDetail.label}<ExternalLink className="h-3.5 w-3.5" /></a></div>
       </div>}
     </article>; })}</div>;
 }
@@ -165,8 +165,8 @@ type PointServiceLinkSet = {
 
 export type PointPrimaryDetailLink = {
   url: string;
-  label: '铁路站点详情' | '携程 · 景点详情' | '高德 · 地点信息';
-  ariaLabel: '铁路站点详情' | '携程景点详细信息' | '高德地点信息';
+  label: string;
+  ariaLabel: string;
   source: 'railway' | 'ctrip' | 'amap';
 };
 
@@ -251,9 +251,7 @@ export function getPointServiceLinks(point: Pick<RoutePoint, 'name' | 'city' | '
   return {
     kind: isRailwayStation ? 'railway' : 'attraction',
     amapUrl: exactAmapUrl,
-    detailUrl: isRailwayStation
-      ? 'https://kyfw.12306.cn/mormhweb/czyd_2143/'
-      : getVerifiedCtripDetailUrl(point),
+    detailUrl: isRailwayStation ? undefined : getVerifiedCtripDetailUrl(point),
     ...(isRailwayStation ? { timetableUrl: getRailwayStationTimetableUrl(point.name, date) } : {}),
     bookingUrl: isRailwayStation
       ? 'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc'
@@ -274,9 +272,9 @@ export function getRailwayStationTimetableUrl(stationName: string, date?: string
   return `https://kyfw.12306.cn/otn/czxx/init?${params}`;
 }
 
-export function getPointPrimaryDetailLink(point: Pick<RoutePoint, 'name' | 'city' | 'type'> & Partial<Pick<RoutePoint, 'lat' | 'lng'>>): PointPrimaryDetailLink {
-  const links = getPointServiceLinks(point);
-  if (links.kind === 'railway' && links.detailUrl) return { url: links.detailUrl, label: '铁路站点详情', ariaLabel: '铁路站点详情', source: 'railway' };
+export function getPointPrimaryDetailLink(point: Pick<RoutePoint, 'name' | 'city' | 'type'> & Partial<Pick<RoutePoint, 'lat' | 'lng'>>, date?: string): PointPrimaryDetailLink {
+  const links = getPointServiceLinks(point, date);
+  if (links.kind === 'railway' && links.timetableUrl) return { url: links.timetableUrl, label: `12306 · ${point.name}到发车次`, ariaLabel: '12306到发车次与到达时间', source: 'railway' };
   if (links.detailUrl) return { url: links.detailUrl, label: '携程 · 景点详情', ariaLabel: '携程景点详细信息', source: 'ctrip' };
   return { url: links.amapUrl, label: '高德 · 地点信息', ariaLabel: '高德地点信息', source: 'amap' };
 }

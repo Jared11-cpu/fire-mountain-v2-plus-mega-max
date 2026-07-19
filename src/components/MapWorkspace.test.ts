@@ -20,10 +20,18 @@ describe('getPointServiceLinks', () => {
     const links = getPointServiceLinks({ name: '宜昌东站', city: '宜昌', type: 'start' }, '2026-07-19');
 
     expect(links.kind).toBe('railway');
-    expect(links.detailUrl).toContain('12306.cn');
+    expect(links.detailUrl).toBeUndefined();
     expect(links.bookingUrl).toContain('12306.cn');
     expect(links.amapUrl).toContain(encodeURIComponent('宜昌 宜昌东站'));
     expect(links.timetableUrl).toBe('https://kyfw.12306.cn/otn/czxx/init?date=2026-07-19&station_code=HAN&station_name=%E5%AE%9C%E6%98%8C%E4%B8%9C%E7%AB%99');
+  });
+
+  it('uses only the station-specific timetable as the railway primary action', () => {
+    expect(getPointPrimaryDetailLink({ name: '武汉站', city: '武汉', type: 'start' }, '2026-07-19')).toMatchObject({
+      source: 'railway',
+      label: '12306 · 武汉站到发车次',
+      url: 'https://kyfw.12306.cn/otn/czxx/init?date=2026-07-19&station_code=WHN&station_name=%E6%AD%A6%E6%B1%89%E7%AB%99',
+    });
   });
 
   it('builds direct 12306 station timetable links for every supported Hubei start station', () => {

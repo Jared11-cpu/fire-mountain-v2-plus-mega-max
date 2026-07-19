@@ -30,5 +30,9 @@ test('publishes only the final AI and AMap plan', async ({ page }) => {
   await transportMinutes.fill('30');
   await transportMinutes.press('Enter');
   await expect(transportMinutes).toHaveValue('30');
-  await expect(page.getByRole('link', { name: '武汉站12306到发车次' })).toHaveAttribute('href', /station_code=WHN.*station_name=/);
+  const timetableLink = page.getByRole('link', { name: '武汉站12306到发车次与到达时间' });
+  await expect(timetableLink).toHaveText('12306 · 武汉站到发车次');
+  await expect(timetableLink).toHaveAttribute('href', /station_code=WHN.*station_name=/);
+  await expect(page.getByText('铁路站点详情')).toHaveCount(0);
+  await expect(page.getByText('站点介绍')).toHaveCount(0);
 });
