@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { baseRoutes } from '../data/routeData';
 import type { TransportPlanResponse } from '../services/transportService';
-import { compactTravelTip, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointPrimaryDetailLink, getPointServiceLinks, getRailwayStationTimetableUrl, getVerifiedCtripDetailUrl, isDirectCtripDetailUrl, normalizeActualStayMinutes, normalizeTravelMinutes, recalculateEditableTimeline } from './MapWorkspace';
+import { compactTravelTip, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointDetailLinks, getPointPrimaryDetailLink, getPointServiceLinks, getRailwayStationTimetableUrl, getVerifiedCtripDetailUrl, getXiaohongshuGuideUrl, isDirectCtripDetailUrl, normalizeActualStayMinutes, normalizeTravelMinutes, recalculateEditableTimeline } from './MapWorkspace';
 import { getFocusedTransportPath, getFocusedTransportSegmentPoints } from './RouteMap';
 
 describe('getPointServiceLinks', () => {
@@ -73,6 +73,29 @@ describe('getPointServiceLinks', () => {
     expect(links.detailUrl).toBeUndefined();
     expect(links.amapUrl).toContain('uri.amap.com/marker');
     expect(links.amapUrl).toContain('position=114.3,30.5');
+    expect(new URL(links.communityUrl).searchParams.get('keyword')).toBe('武汉 临时点位 游玩攻略');
+  });
+
+  it('gives every point AMap plus an honest detail source', () => {
+    expect(getPointDetailLinks({ name: '东湖磨山景区', city: '武汉', type: 'scenic', lat: 30.54, lng: 114.42 })).toEqual([
+      expect.objectContaining({ source: 'amap', label: '高德 · 地点地图' }),
+      expect.objectContaining({ source: 'ctrip', label: '携程 · 景点详情', url: 'https://you.ctrip.com/sight/wuhan145/119306.html' }),
+    ]);
+    expect(getPointDetailLinks({ name: '东湖·香榭水岸', city: '武汉', type: 'scenic', lat: 30.55, lng: 114.4 })).toEqual([
+      expect.objectContaining({ source: 'amap' }),
+      expect.objectContaining({ source: 'xiaohongshu', label: '小红书 · 攻略搜索' }),
+    ]);
+  });
+
+  it('keeps railway cards connected to AMap, 12306, and Xiaohongshu', () => {
+    expect(getPointDetailLinks({ name: '武汉站', city: '武汉', type: 'start', lat: 30.607, lng: 114.424 }, '2026-07-19').map((link) => link.source)).toEqual(['amap', 'railway', 'xiaohongshu']);
+  });
+
+  it('builds an official Xiaohongshu web search for unmatched places', () => {
+    const url = new URL(getXiaohongshuGuideUrl({ name: '东湖·楚天府', city: '武汉' }));
+    expect(url.hostname).toBe('www.xiaohongshu.com');
+    expect(url.pathname).toBe('/search_result');
+    expect(url.searchParams.get('keyword')).toBe('武汉 东湖·楚天府 游玩攻略');
   });
 
   it('always provides a direct primary detail link with AMap as the honest fallback', () => {

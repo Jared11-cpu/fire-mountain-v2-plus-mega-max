@@ -140,7 +140,7 @@ function Stops({ points, selectedId, fallbackImageUrl, dailyRecords, maxDays, on
       .catch(() => undefined);
     return () => controller.abort();
   }, [coverQueryKey]);
-  return <div className="space-y-4"><h4 className="font-display text-2xl font-black">地点安排</h4>{points.map((point, index) => { const expanded = expandedId === point.id; const date = dailyRecords.find((record) => record.day === (point.day ?? 1))?.date; const primaryDetail = getPointPrimaryDetailLink(point, date); const resolvedCover = getCuratedPointCover(point.name) ?? fetchedCovers[point.id]; const coverUrl = resolvedCover?.imageUrl ?? point.imageUrl ?? fallbackImageUrl; return <article key={point.id} className={`overflow-hidden rounded-[1.65rem] border bg-white transition ${selectedId === point.id ? 'border-river shadow-[0_12px_35px_rgba(14,116,128,.14)]' : 'border-ink/10 shadow-sm'}`}>
+  return <div className="space-y-4"><h4 className="font-display text-2xl font-black">地点安排</h4>{points.map((point, index) => { const expanded = expandedId === point.id; const date = dailyRecords.find((record) => record.day === (point.day ?? 1))?.date; const detailLinks = getPointDetailLinks(point, date); const resolvedCover = getCuratedPointCover(point.name) ?? fetchedCovers[point.id]; const coverUrl = resolvedCover?.imageUrl ?? point.imageUrl ?? fallbackImageUrl; return <article key={point.id} className={`overflow-hidden rounded-[1.65rem] border bg-white transition ${selectedId === point.id ? 'border-river shadow-[0_12px_35px_rgba(14,116,128,.14)]' : 'border-ink/10 shadow-sm'}`}>
       <button type="button" aria-expanded={expanded} onClick={() => { setExpandedId(expanded ? null : point.id); onSelect(point); }} className="group relative block h-36 w-full overflow-hidden text-left">
         <img src={coverUrl} alt={`${point.name}风景封面`} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.035]" />
         <span className="absolute inset-0 bg-gradient-to-t from-ink/95 via-ink/20 to-transparent" />
@@ -150,7 +150,7 @@ function Stops({ points, selectedId, fallbackImageUrl, dailyRecords, maxDays, on
       {expanded && <div className="space-y-4 p-4">
         <div className="grid grid-cols-2 gap-2 text-xs font-bold"><EditableStayTile value={point.actualDurationMinutes ?? 0} plannedValue={point.durationMinutes} onCommit={(value) => onPatchPoint(point.id, { actualDurationMinutes: value })} />{index < points.length - 1 ? <EditableTravelTile value={point.travelMinutesToNext} onCommit={(value) => onPatchPoint(point.id, { travelMinutesToNext: value })} /> : <InfoTile icon={Navigation} label="下一段交通" value="行程终点" />}</div>
         <section className="rounded-2xl border border-ink/10 p-3"><div className="mb-3"><strong className="text-sm">我的地点安排</strong></div><div className="grid grid-cols-2 gap-2"><label className="text-[11px] font-black text-ink/50">安排日期<select value={point.day ?? 1} onChange={(event) => onPatchPoint(point.id, { day: Number(event.target.value) })} className="focus-ring mt-1 w-full rounded-xl border border-ink/10 bg-white px-2 py-2 text-sm font-bold text-ink">{Array.from({ length: maxDays }, (_, day) => <option key={day + 1} value={day + 1}>第{day + 1}天</option>)}</select></label><label className="text-[11px] font-black text-ink/50">计划停留<input type="number" min={10} max={480} step={5} value={point.durationMinutes} onChange={(event) => onPatchPoint(point.id, { durationMinutes: Math.max(10, Number(event.target.value) || 10) })} className="focus-ring mt-1 w-full rounded-xl border border-ink/10 px-2 py-2 text-sm font-bold text-ink" /></label></div><label className="mt-3 block text-[11px] font-black text-ink/50">我的安排<textarea value={notes[point.id] ?? ''} placeholder="例如：提前预约、重点拍摄坝体全景、为老人预留休息时间" onChange={(event) => onPatchNote(point.id, event.target.value)} rows={3} className="focus-ring mt-1 w-full resize-none rounded-xl border border-ink/10 px-3 py-2 text-sm font-medium text-ink" /></label></section>
-        <div className="flex justify-end"><a href={primaryDetail.url} target="_blank" rel="noreferrer" aria-label={`${point.name}${primaryDetail.ariaLabel}`} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white transition hover:bg-river">{primaryDetail.label}<ExternalLink className="h-3.5 w-3.5" /></a></div>
+        <div aria-label={`${point.name}地点详情入口`} className="flex flex-wrap justify-end gap-2">{detailLinks.map((link) => <a key={link.source} href={link.url} target="_blank" rel="noreferrer" aria-label={`${point.name}${link.ariaLabel}`} className={`inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-2 text-xs font-black transition ${link.source === 'amap' ? 'border border-river/20 bg-river/[0.06] text-river hover:bg-river/15' : link.source === 'xiaohongshu' ? 'bg-[#ff2442] text-white hover:bg-[#e51f3b]' : link.source === 'ctrip' ? 'bg-[#287dfa] text-white hover:bg-[#1768d6]' : 'bg-ink text-white hover:bg-river'}`}>{link.label}<ExternalLink className="h-3.5 w-3.5" /></a>)}</div>
       </div>}
     </article>; })}</div>;
 }
@@ -159,6 +159,7 @@ type PointServiceLinkSet = {
   kind: 'railway' | 'attraction';
   amapUrl: string;
   detailUrl?: string;
+  communityUrl: string;
   timetableUrl?: string;
   bookingUrl: string;
 };
@@ -168,6 +169,13 @@ export type PointPrimaryDetailLink = {
   label: string;
   ariaLabel: string;
   source: 'railway' | 'ctrip' | 'amap';
+};
+
+export type PointDetailLink = {
+  url: string;
+  label: string;
+  ariaLabel: string;
+  source: 'railway' | 'ctrip' | 'amap' | 'xiaohongshu';
 };
 
 const CTRIP_DETAIL_URLS: Readonly<Record<string, string>> = {
@@ -185,6 +193,13 @@ const CTRIP_DETAIL_URLS: Readonly<Record<string, string>> = {
   粮道街: 'https://you.ctrip.com/sight/wuhan145/71454382.html',
   江汉关: 'https://you.ctrip.com/sight/wuhan145/1489369.html',
   汉口江滩日落: 'https://you.ctrip.com/sight/wuhan145/119534.html',
+  东湖: 'https://you.ctrip.com/sight/wuhan145/8974.html',
+  武汉东湖: 'https://you.ctrip.com/sight/wuhan145/8974.html',
+  东湖风景区: 'https://you.ctrip.com/sight/wuhan145/8974.html',
+  东湖生态旅游风景区: 'https://you.ctrip.com/sight/wuhan145/8974.html',
+  东湖磨山景区: 'https://you.ctrip.com/sight/wuhan145/119306.html',
+  龟山风景区: 'https://you.ctrip.com/sight/wuhan145/8980.html',
+  湖北省博物馆: 'https://you.ctrip.com/sight/wuhan145/8977.html',
   女儿城: 'https://you.ctrip.com/sight/enshicity1446196/1414339.html',
   恩施大峡谷游客中心: 'https://you.ctrip.com/sight/enshigrandcanyon2128618.html',
   七星寨栈道: 'https://you.ctrip.com/sight/enshicity1446196/1714425.html',
@@ -213,6 +228,10 @@ const CTRIP_DETAIL_ALIASES: ReadonlyArray<{ matches: (name: string) => boolean; 
   { matches: (name) => /武汉大学|珞珈山/.test(name), url: 'https://you.ctrip.com/sight/145/1493507.html' },
   { matches: (name) => /武汉长江大桥/.test(name), url: 'https://you.ctrip.com/sight/wuhan145/8978.html' },
   { matches: (name) => /黄鹤楼/.test(name), url: 'https://you.ctrip.com/sight/wuhan145/8979.html' },
+  { matches: (name) => /^(?:武汉)?东湖(?:生态旅游)?风景区$/.test(name), url: 'https://you.ctrip.com/sight/wuhan145/8974.html' },
+  { matches: (name) => /^东湖磨山(?:风景区|景区)?$/.test(name), url: 'https://you.ctrip.com/sight/wuhan145/119306.html' },
+  { matches: (name) => /^龟山(?:风景区|景区|公园)$/.test(name), url: 'https://you.ctrip.com/sight/wuhan145/8980.html' },
+  { matches: (name) => /湖北省博物馆/.test(name), url: 'https://you.ctrip.com/sight/wuhan145/8977.html' },
   { matches: (name) => /恩施大峡谷/.test(name), url: 'https://you.ctrip.com/sight/enshigrandcanyon2128618.html' },
   { matches: (name) => /荆州古城|古城墙/.test(name), url: 'https://you.ctrip.com/sight/jingzhou413/52023.html' },
   { matches: (name) => /襄阳古城|北街/.test(name), url: 'https://you.ctrip.com/sight/xiangyang414/5716122.html' },
@@ -252,11 +271,17 @@ export function getPointServiceLinks(point: Pick<RoutePoint, 'name' | 'city' | '
     kind: isRailwayStation ? 'railway' : 'attraction',
     amapUrl: exactAmapUrl,
     detailUrl: isRailwayStation ? undefined : getVerifiedCtripDetailUrl(point),
+    communityUrl: getXiaohongshuGuideUrl(point),
     ...(isRailwayStation ? { timetableUrl: getRailwayStationTimetableUrl(point.name, date) } : {}),
     bookingUrl: isRailwayStation
       ? 'https://kyfw.12306.cn/otn/leftTicket/init?linktypeid=dc'
       : ctripTicketSearchUrl,
   };
+}
+
+export function getXiaohongshuGuideUrl(point: Pick<RoutePoint, 'name' | 'city'>) {
+  const params = new URLSearchParams({ keyword: `${point.city} ${point.name} 游玩攻略`, source: 'web_search_result_notes' });
+  return `https://www.xiaohongshu.com/search_result?${params}`;
 }
 
 const RAILWAY_STATION_CODES: Readonly<Record<string, string>> = {
@@ -277,6 +302,20 @@ export function getPointPrimaryDetailLink(point: Pick<RoutePoint, 'name' | 'city
   if (links.kind === 'railway' && links.timetableUrl) return { url: links.timetableUrl, label: `12306 · ${point.name}到发车次`, ariaLabel: '12306到发车次与到达时间', source: 'railway' };
   if (links.detailUrl) return { url: links.detailUrl, label: '携程 · 景点详情', ariaLabel: '携程景点详细信息', source: 'ctrip' };
   return { url: links.amapUrl, label: '高德 · 地点信息', ariaLabel: '高德地点信息', source: 'amap' };
+}
+
+export function getPointDetailLinks(point: Pick<RoutePoint, 'name' | 'city' | 'type'> & Partial<Pick<RoutePoint, 'lat' | 'lng'>>, date?: string): PointDetailLink[] {
+  const links = getPointServiceLinks(point, date);
+  const actions: PointDetailLink[] = [
+    { url: links.amapUrl, label: '高德 · 地点地图', ariaLabel: '高德地图位置', source: 'amap' },
+  ];
+  if (links.kind === 'railway' && links.timetableUrl) {
+    actions.push({ url: links.timetableUrl, label: `12306 · ${point.name}到发车次`, ariaLabel: '12306到发车次与到达时间', source: 'railway' });
+  }
+  actions.push(links.detailUrl
+    ? { url: links.detailUrl, label: '携程 · 景点详情', ariaLabel: '携程景点详细信息', source: 'ctrip' }
+    : { url: links.communityUrl, label: '小红书 · 攻略搜索', ariaLabel: '小红书相关游玩攻略', source: 'xiaohongshu' });
+  return actions;
 }
 
 export function normalizeActualStayMinutes(value: string | number) {

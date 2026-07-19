@@ -34,6 +34,8 @@ test('publishes only the final AI and AMap plan', async ({ page }) => {
   const timetableLink = page.getByRole('link', { name: '武汉站12306到发车次与到达时间' });
   await expect(timetableLink).toHaveText('12306 · 武汉站到发车次');
   await expect(timetableLink).toHaveAttribute('href', /station_code=WHN.*station_name=/);
+  await expect(page.getByRole('link', { name: '武汉站高德地图位置' })).toHaveAttribute('href', /uri\.amap\.com\/marker/);
+  await expect(page.getByRole('link', { name: '武汉站小红书相关游玩攻略' })).toHaveAttribute('href', /xiaohongshu\.com\/search_result/);
   await expect(page.getByText('铁路站点详情')).toHaveCount(0);
   await expect(page.getByText('站点介绍')).toHaveCount(0);
 });
