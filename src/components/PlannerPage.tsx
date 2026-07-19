@@ -8,7 +8,7 @@ import { useTrip } from '../state/tripStore';
 import { MapWorkspace } from './MapWorkspace';
 
 export function PlannerPage() {
-  const { request, plan, parsedTags, parseWarnings, isReplanning, updateRequest, parseText, generateFromText, replan, resetPlan, notify } = useTrip();
+  const { request, plan, parsedTags, parseWarnings, isGenerating, isReplanning, updateRequest, parseText, generateFromText, replan, resetPlan, notify } = useTrip();
   const [resultMode, setResultMode] = useState(Boolean(plan));
   const [selectedPointId, setSelectedPointId] = useState<string | undefined>(plan?.route.points[0]?.id);
   const [locating, setLocating] = useState(false);
@@ -26,6 +26,8 @@ export function PlannerPage() {
       setSelectedPointId(next.route.points[0]?.id);
       setResultMode(true);
       window.setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+    } catch {
+      setResultMode(false);
     } finally { setGenerating(false); }
   };
 
@@ -85,8 +87,10 @@ export function PlannerPage() {
             <ChoiceGroup label="饮食限制" values={DIETARY_RESTRICTIONS} selected={request.dietaryRestrictions} onToggle={(item) => toggle<DietaryRestriction>('dietaryRestrictions', item)} />
             <ChoiceGroup label="特殊需求" values={SPECIAL_NEEDS} selected={request.specialNeeds} onToggle={(item) => toggle<SpecialNeed>('specialNeeds', item)} />
 
-            <button type="button" disabled={generating} onClick={createPlan} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-6 py-4 font-black text-white shadow-soft transition hover:bg-river active:scale-[0.99] disabled:cursor-wait disabled:opacity-70">{generating ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}{generating ? 'AI 正在识别必经地点…' : 'AI 个性化生成方案'}</button>
+            <button type="button" disabled={generating || isGenerating} onClick={createPlan} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ink px-6 py-4 font-black text-white shadow-soft transition hover:bg-river active:scale-[0.99] disabled:cursor-wait disabled:opacity-70">{generating || isGenerating ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}{generating || isGenerating ? '正在生成最终 AI 分析…' : 'AI 个性化生成方案'}</button>
           </section>}
+
+          {isGenerating && !plan && <section className="mt-5 rounded-[1.75rem] border border-river/15 bg-white/90 p-8 text-center shadow-soft" aria-live="polite"><Loader2 className="mx-auto h-8 w-8 animate-spin text-river" /><h2 className="mt-4 font-display text-2xl font-black">正在生成最终个性化方案</h2><p className="mt-2 text-sm font-bold text-ink/55">正在完成真实地点检索与千问分析；完成前不会显示规则占位结果。</p></section>}
 
           {resultMode && plan && <section ref={resultRef} className="space-y-3 scroll-mt-24">
             <div className="flex flex-col justify-between gap-3 rounded-[1.25rem] bg-white/75 px-4 py-3 shadow-sm ring-1 ring-ink/5 backdrop-blur md:flex-row md:items-center md:px-5">
@@ -97,7 +101,7 @@ export function PlannerPage() {
               </div>
             </div>
             <MapWorkspace route={plan.route} plan={plan.content} selectedPointId={selectedPointId} activePointIndex={Math.max(0, plan.route.points.findIndex((item) => item.id === selectedPointId))} navigating={false} imageUrl={selectedCity.imageUrl} onSelectPoint={(point: RoutePoint) => setSelectedPointId(point.id)} onRegenerate={replan} onSimulateNavigation={() => notify('本功能仅演示路线顺序，不冒充实时导航。')} />
-            {isReplanning && <div className="fixed inset-0 z-[90] grid place-items-center bg-ink/25 backdrop-blur-sm"><div className="flex items-center gap-3 rounded-3xl bg-white px-6 py-5 font-black text-ink shadow-soft"><Loader2 className="h-5 w-5 animate-spin text-river" />规则引擎计算中…</div></div>}
+            {isReplanning && <div className="fixed inset-0 z-[90] grid place-items-center bg-ink/25 backdrop-blur-sm"><div className="flex items-center gap-3 rounded-3xl bg-white px-6 py-5 font-black text-ink shadow-soft"><Loader2 className="h-5 w-5 animate-spin text-river" />正在生成最终 AI 分析…</div></div>}
           </section>}
         </div>
       </div>

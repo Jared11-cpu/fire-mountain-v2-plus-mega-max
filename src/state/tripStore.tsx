@@ -43,6 +43,7 @@ export type TripState = {
   parseWarnings: string[];
   saveStatus: SaveStatus;
   toast: ToastMessage;
+  isGenerating: boolean;
   isReplanning: boolean;
   replanSummary: string;
 };
@@ -51,10 +52,10 @@ type Action =
   | { type: 'request'; request: TripRequest }
   | { type: 'parsed'; request: TripRequest; tags: ParsedTag[]; warnings: string[] }
   | { type: 'plan'; plan: TripPlan | null }
-  | { type: 'enriched'; planId: string; analysis?: string; foods?: TripPlan['foodRecommendations']; routePoints?: RoutePoint[] }
   | { type: 'journal'; entries: JournalEntry[] }
   | { type: 'save'; status: SaveStatus }
   | { type: 'toast'; toast: ToastMessage }
+  | { type: 'generating'; value: boolean }
   | { type: 'replanning'; value: boolean }
   | { type: 'summary'; value: string }
   | { type: 'hydrate'; state: TripState };
@@ -64,14 +65,10 @@ function reducer(state: TripState, action: Action): TripState {
     case 'request': return { ...state, request: action.request };
     case 'parsed': return { ...state, request: action.request, parsedTags: action.tags, parseWarnings: action.warnings };
     case 'plan': return { ...state, plan: action.plan };
-    case 'enriched': {
-      if (!state.plan || state.plan.id !== action.planId) return state;
-      const plan = action.routePoints?.length ? applyPersonalizedRoute(state.plan, action.routePoints) : state.plan;
-      return { ...state, plan: { ...plan, updatedAt: new Date().toISOString(), content: action.analysis ? { ...plan.content, summary: action.analysis } : plan.content, foodRecommendations: action.foods ?? plan.foodRecommendations } };
-    }
     case 'journal': return { ...state, journalEntries: action.entries };
     case 'save': return { ...state, saveStatus: action.status };
     case 'toast': return { ...state, toast: action.toast };
+    case 'generating': return { ...state, isGenerating: action.value };
     case 'replanning': return { ...state, isReplanning: action.value };
     case 'summary': return { ...state, replanSummary: action.value };
     case 'hydrate': return action.state;
@@ -108,6 +105,7 @@ function readInitialState(): TripState {
     parseWarnings: [],
     saveStatus: persisted ? 'saved' : 'idle',
     toast: null,
+    isGenerating: false,
     isReplanning: false,
     replanSummary: '',
   };
@@ -137,6 +135,7 @@ const TripContext = createContext<TripContextValue | null>(null);
 export function TripProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, undefined, readInitialState);
   const hydrated = useRef(false);
+  const generationId = useRef(0);
 
   const notify = useCallback((message: string, tone: ToastTone = 'info') => {
     const id = Date.now();
@@ -203,46 +202,66 @@ export function TripProvider({ children }: { children: ReactNode }) {
     }
   }, [notify, state.request]);
 
-  const enrichPlan = useCallback((plan: TripPlan, request: TripRequest) => {
-    void enrichTripPlanWithBackend(plan, request).then((enrichment) => {
-      dispatch({ type: 'enriched', planId: plan.id, ...enrichment });
-      dispatch({ type: 'summary', value: enrichment.routePoints?.length ? '已按首页需求加载千问分析、高德真实个性化地点与餐厅推荐。' : '已加载千问方案分析与高德真实餐厅推荐。' });
-      notify(enrichment.routePoints?.length ? '个性化地点与必经点已加入路线' : '千问分析与真实餐厅推荐已更新', 'success');
-    }).catch(() => {
-      dispatch({ type: 'summary', value: 'AI 或高德服务暂不可用，当前保留规则路线与核验提示。' });
-      notify('在线增强暂不可用，已保留可用的规则方案', 'info');
-    });
-  }, [notify]);
-
   const generateForRequest = useCallback((request: TripRequest) => {
     const plan = generateTripPlan(request, state.plan);
     dispatch({ type: 'plan', plan });
-    dispatch({ type: 'summary', value: '已生成基础路线，正在让千问按需求选择高德真实地点。' });
-    notify(`已生成${request.destinationCity}${request.days}天基础路线，正在匹配个性化地点`, 'success');
-    enrichPlan(plan, request);
     return plan;
-  }, [enrichPlan, state.plan]);
+  }, [state.plan]);
 
   const generate = useCallback(() => generateForRequest(state.request), [generateForRequest, state.request]);
 
   const generateFromText = useCallback(async (text: string) => {
-    const request = await parseText(text);
-    return generateForRequest(request);
-  }, [generateForRequest, parseText]);
+    const currentGeneration = ++generationId.current;
+    dispatch({ type: 'generating', value: true });
+    dispatch({ type: 'summary', value: '正在识别个性化要求，并让千问从高德真实地点中生成最终方案…' });
+    try {
+      const request = await parseText(text);
+      const draft = generateTripPlan(request, state.plan);
+      const enrichment = await enrichTripPlanWithBackend(draft, request);
+      if (!enrichment.analysis || !enrichment.routePoints?.length) {
+        throw new Error('真实地点或 AI 分析未完整返回，请稍后重试。');
+      }
+      const finalPlan = applyEnrichment(draft, enrichment);
+      if (currentGeneration !== generationId.current) return finalPlan;
+      dispatch({ type: 'plan', plan: finalPlan });
+      dispatch({ type: 'summary', value: '已一次性生成千问分析、高德真实个性化地点与餐厅推荐。' });
+      notify('AI 个性化方案已生成', 'success');
+      return finalPlan;
+    } catch (error) {
+      if (currentGeneration === generationId.current) {
+        dispatch({ type: 'summary', value: '真实 AI 分析暂未完整返回，未展示规则生成的占位方案。' });
+        notify(error instanceof Error ? error.message : 'AI 个性化方案生成失败，请稍后重试。', 'error');
+      }
+      throw error;
+    } finally {
+      if (currentGeneration === generationId.current) dispatch({ type: 'generating', value: false });
+    }
+  }, [notify, parseText, state.plan]);
 
   const replan = useCallback(async () => {
     if (state.isReplanning || !state.plan) return;
+    const currentGeneration = ++generationId.current;
     dispatch({ type: 'replanning', value: true });
-    dispatch({ type: 'summary', value: '规则引擎计算中…' });
-    await new Promise((resolve) => window.setTimeout(resolve, 650));
-    const next = generateTripPlan(state.request, state.plan);
-    const difference = comparePlans(state.plan, next);
-    dispatch({ type: 'plan', plan: next });
-    dispatch({ type: 'summary', value: `${difference.message} 正在重新匹配个性化地点。` });
-    dispatch({ type: 'replanning', value: false });
-    enrichPlan(next, state.request);
-    notify(difference.message, difference.changed ? 'success' : 'info');
-  }, [enrichPlan, notify, state.isReplanning, state.plan, state.request]);
+    dispatch({ type: 'summary', value: '正在重新查询真实地点并生成最终 AI 分析…' });
+    try {
+      const draft = generateTripPlan(state.request, state.plan);
+      const difference = comparePlans(state.plan, draft);
+      const enrichment = await enrichTripPlanWithBackend(draft, state.request);
+      if (!enrichment.analysis || !enrichment.routePoints?.length) throw new Error('真实地点或 AI 分析未完整返回，请稍后重试。');
+      const finalPlan = applyEnrichment(draft, enrichment);
+      if (currentGeneration !== generationId.current) return;
+      dispatch({ type: 'plan', plan: finalPlan });
+      dispatch({ type: 'summary', value: `${difference.message} 已加载最终千问分析与高德真实地点。` });
+      notify(difference.message, difference.changed ? 'success' : 'info');
+    } catch (error) {
+      if (currentGeneration === generationId.current) {
+        dispatch({ type: 'summary', value: '重新分析未完整返回，已保留上一次真实方案。' });
+        notify(error instanceof Error ? error.message : '重新分析失败，请稍后重试。', 'error');
+      }
+    } finally {
+      if (currentGeneration === generationId.current) dispatch({ type: 'replanning', value: false });
+    }
+  }, [notify, state.isReplanning, state.plan, state.request]);
 
   const setPlan = useCallback((plan: TripPlan | null) => dispatch({ type: 'plan', plan }), []);
   const patchPlan = useCallback((updater: (plan: TripPlan) => TripPlan) => {
@@ -328,6 +347,16 @@ function applyPersonalizedRoute(plan: TripPlan, recommended: RoutePoint[]): Trip
       transportSuggestion: `${plan.route.transportSuggestion} 地点由高德实时检索，千问按本次首页需求排序。`,
     },
     settings: { ...plan.settings, targetPointCount: points.length, targetDurationMinutes: points.reduce((sum, point) => sum + point.durationMinutes + point.travelMinutesToNext, 0) },
+  };
+}
+
+function applyEnrichment(plan: TripPlan, enrichment: Awaited<ReturnType<typeof enrichTripPlanWithBackend>>): TripPlan {
+  const personalized = enrichment.routePoints?.length ? applyPersonalizedRoute(plan, enrichment.routePoints) : plan;
+  return {
+    ...personalized,
+    updatedAt: new Date().toISOString(),
+    content: enrichment.analysis ? { ...personalized.content, summary: enrichment.analysis } : personalized.content,
+    foodRecommendations: enrichment.foods ?? personalized.foodRecommendations,
   };
 }
 

@@ -30,7 +30,7 @@ function App() {
     <div className="min-h-screen text-ink">
       <Header page={page} nav={navItems} onNavigate={go} />
       <Routes>
-        <Route path="/" element={<LandingPage onStart={(prompt) => { if (prompt) { updateRequest({ freeText: prompt }); setPlan(null); go('planner'); void generateFromText(prompt); return; } go('planner'); }} onCitySelect={(city) => { selectCity(city); go('planner'); }} onFootprintDetail={() => go('journal')} />} />
+        <Route path="/" element={<LandingPage onStart={(prompt) => { if (prompt) { updateRequest({ freeText: prompt }); setPlan(null); go('planner'); void generateFromText(prompt).catch(() => undefined); return; } go('planner'); }} onCitySelect={(city) => { selectCity(city); go('planner'); }} onFootprintDetail={() => go('journal')} />} />
         <Route path="/planner" element={<PlannerPage />} />
         <Route path="/journal" element={<JournalPage />} />
         <Route path="/journal/:entryId" element={<JournalPage />} />
