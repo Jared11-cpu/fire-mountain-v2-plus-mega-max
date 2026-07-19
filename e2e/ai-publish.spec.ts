@@ -38,4 +38,16 @@ test('publishes only the final AI and AMap plan', async ({ page }) => {
   await expect(page.getByRole('link', { name: '武汉站小红书相关游玩攻略' })).toHaveAttribute('href', /xiaohongshu\.com\/search_result/);
   await expect(page.getByText('铁路站点详情')).toHaveCount(0);
   await expect(page.getByText('站点介绍')).toHaveCount(0);
+
+  await page.getByRole('tab', { name: '交通' }).click();
+  await expect(page.getByText('规则引擎交通方案')).toHaveCount(0);
+  const preferenceGroup = page.getByRole('radiogroup', { name: '公共交通路线偏好' });
+  await expect(preferenceGroup).toBeVisible();
+  for (const label of ['推荐', '时间短', '最省钱', '少换乘', '少步行', '地铁优先']) {
+    const preference = preferenceGroup.getByRole('radio', { name: label });
+    await expect(preference).toBeVisible();
+    const dimensions = await preference.evaluate((element) => ({ height: element.getBoundingClientRect().height, fontSize: Number.parseFloat(getComputedStyle(element).fontSize) }));
+    expect(dimensions.height).toBeGreaterThanOrEqual(44);
+    expect(dimensions.fontSize).toBeGreaterThanOrEqual(13);
+  }
 });
