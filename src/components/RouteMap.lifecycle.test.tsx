@@ -8,6 +8,7 @@ const amapMocks = vi.hoisted(() => {
   const mapInstance = {
     add: vi.fn(), remove: vi.fn(), clearMap: vi.fn(), destroy: vi.fn(), resize: vi.fn(),
     setFitView: vi.fn(), setFeatures: vi.fn(), setMapStyle: vi.fn(), setZoomAndCenter: vi.fn(),
+    zoomIn: vi.fn(), zoomOut: vi.fn(), getZoom: vi.fn(() => 12), on: vi.fn(),
   };
   const Map = vi.fn(function Map(_container: unknown, _options: Record<string, unknown>) { return mapInstance; });
   const planBackendDrivingRoute = vi.fn();
@@ -48,6 +49,8 @@ describe('RouteMap lifecycle', () => {
     const view = render(<RouteMap route={route} {...common} onSelectPoint={() => undefined} />);
     await waitFor(() => expect(amapMocks.Map).toHaveBeenCalledTimes(1));
     expect(amapMocks.Map.mock.calls[0][1]).toMatchObject({ dragEnable: true, zoomEnable: true, scrollWheel: true, touchZoom: true, doubleClickZoom: true, keyboardEnable: true });
+    fireEvent.wheel(view.getByRole('application', { name: '可缩放和拖动的高德交互地图' }), { deltaY: -120 });
+    expect(amapMocks.mapInstance.zoomIn).toHaveBeenCalled();
 
     const transportPlan = {
       source: 'transport-api', freshness: 'live-query', sourceLabel: '高德动态公交规划', generatedAt: new Date().toISOString(),
