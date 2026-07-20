@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Camera, Clock3, MapPin, Navigation, RefreshCw, Route as RouteIcon, Utensils } from 'lucide-react';
+import { AlertTriangle, Camera, Clock3, LocateFixed, MapPin, Minus, Navigation, Plus, RefreshCw, Route as RouteIcon, Utensils } from 'lucide-react';
 import type { RoutePoint, SmartRoute } from '../types/route';
 import { getPointTypeLabel } from '../services/mapService';
 import { classifyDrivingFailure, convertGpsPoint, loadAmapJsApi, planBackendDrivingRoute, resetAmapJsApiLoader, type DrivingSearchFailure, type RoadPlanMetrics, type RoadPlanStatus } from '../services/amapDriving';
@@ -112,6 +112,14 @@ export function RouteMap({ route, transportPlan, focusedTransportSegmentId, sele
           center: [amapPoints[0].lng, amapPoints[0].lat],
           viewMode: '2D',
           resizeEnable: true,
+          dragEnable: true,
+          zoomEnable: true,
+          scrollWheel: true,
+          touchZoom: true,
+          doubleClickZoom: true,
+          keyboardEnable: true,
+          jogEnable: true,
+          animateEnable: true,
           mapStyle: 'amap://styles/normal',
           features: ['bg', 'road', 'building', 'point'],
           layers: [new AMap.TileLayer({ visible: true, zIndex: 1 })],
@@ -238,7 +246,7 @@ export function RouteMap({ route, transportPlan, focusedTransportSegmentId, sele
 
   return <section className={`min-w-0 overflow-hidden bg-white ${mapOnly ? 'h-full' : 'rounded-[1.75rem] shadow-soft ring-1 ring-ink/5'}`}>
     {!mapOnly && <div className="flex flex-col gap-4 border-b border-ink/5 p-5 md:flex-row md:items-center md:justify-between"><div><div className="inline-flex items-center gap-2 text-xs font-black tracking-[.16em] text-river"><Navigation className="h-4 w-4"/>LIVE ROUTE</div><h3 className="mt-2 font-display text-2xl font-black">{route.title}</h3><p className="mt-1 text-sm text-ink/50">{message}</p></div><div className="flex gap-2 text-xs font-bold"><span className="rounded-full bg-mist px-3 py-2">{route.totalDistanceKm} km</span><span className="rounded-full bg-mist px-3 py-2">{route.recommendedStartTime} 出发</span></div></div>}
-      <div className={mapOnly ? 'h-full min-w-0' : 'grid min-w-0 lg:grid-cols-[1.35fr_.65fr]'}><div className={`relative min-w-0 overflow-hidden bg-[#d8f1ee] ${mapOnly ? 'h-full min-h-[620px]' : 'min-h-[430px]'}`}><div ref={container} className={`absolute inset-0 ${!mapAvailable ? 'invisible' : ''}`}/>{mapAvailable && <div className={`pointer-events-none absolute bottom-3 left-3 z-20 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black shadow-sm ${focusedTransportSegmentId ? 'text-tower' : 'text-river'}`}>{focusedTransportSegmentId ? focusedRoadStatus === 'loading' ? '正在查询本段真实道路…' : focusedRoadStatus === 'failed' ? '本段真实路线暂不可用' : '高德真实阶段路线' : usingTransitGeometry ? '动态公交/地铁路线' : '高德真实驾车路线'}</div>}{usingTransitGeometry && mapAvailable && <div className="pointer-events-none absolute bottom-12 left-3 z-20 flex flex-wrap gap-1.5 rounded-2xl bg-white/92 p-2 text-[9px] font-black shadow-sm"><MapLegend color="#c94f3d" label="地铁"/><MapLegend color="#0e6b72" label="公交"/><MapLegend color="#6b7280" label="步行" dashed/><MapLegend color="#d97706" label="驾车"/></div>}{!mapAvailable && status !== 'loading' && <GaodeRasterRouteMap route={route} roadPath={displayedRasterPath} focusPath={displayedFocusedPath} focusStatus={focusedRoadStatus} focusedTransportSegmentId={focusedTransportSegmentId} selectedPointId={selectedPointId} onSelectPoint={onSelectPoint} journalCards={journalCards} />}{status === 'loading' && <div className="absolute inset-0 grid place-items-center bg-[#d8f1ee]"><div className="rounded-2xl bg-white/90 px-5 py-4 text-sm font-black text-river shadow-soft">正在请求高德道路规划…</div></div>}{failed && <div role="alert" className="absolute left-4 right-4 top-20 z-30 rounded-2xl border border-red-200 bg-white/95 p-4 shadow-xl backdrop-blur"><div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500"/><div className="min-w-0 flex-1"><strong className="block text-sm text-red-700">道路规划失败，未绘制估算路线</strong><p className="mt-1 text-xs font-bold leading-5 text-ink/55">{message}；为避免误导，不会用点到点直线替代真实道路。</p></div><button type="button" onClick={() => { resetAmapJsApiLoader(); setRetryVersion((value) => value + 1); }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white"><RefreshCw className="h-3.5 w-3.5"/>重新规划</button></div></div>}</div>
+      <div className={mapOnly ? 'h-full min-w-0' : 'grid min-w-0 lg:grid-cols-[1.35fr_.65fr]'}><div className={`relative min-w-0 overflow-hidden bg-[#d8f1ee] ${mapOnly ? 'h-full min-h-[620px]' : 'min-h-[430px]'}`}><div ref={container} className={`absolute inset-0 ${!mapAvailable ? 'invisible' : ''}`}/>{mapAvailable && <MapInteractionControls label="高德交互地图" onZoomIn={() => mapRef.current?.zoomIn?.()} onZoomOut={() => mapRef.current?.zoomOut?.()} onReset={() => mapRef.current?.setFitView?.([...overlayRef.current, ...markerRef.current], false, [90, 90, 90, 90])} />}{mapAvailable && <div className={`pointer-events-none absolute bottom-3 left-3 z-20 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black shadow-sm ${focusedTransportSegmentId ? 'text-tower' : 'text-river'}`}>{focusedTransportSegmentId ? focusedRoadStatus === 'loading' ? '正在查询本段真实道路…' : focusedRoadStatus === 'failed' ? '本段真实路线暂不可用' : '高德真实阶段路线' : usingTransitGeometry ? '动态公交/地铁路线' : '高德真实驾车路线'}</div>}{usingTransitGeometry && mapAvailable && <div className="pointer-events-none absolute bottom-12 left-3 z-20 flex flex-wrap gap-1.5 rounded-2xl bg-white/92 p-2 text-[9px] font-black shadow-sm"><MapLegend color="#c94f3d" label="地铁"/><MapLegend color="#0e6b72" label="公交"/><MapLegend color="#6b7280" label="步行" dashed/><MapLegend color="#d97706" label="驾车"/></div>}{!mapAvailable && status !== 'loading' && <GaodeRasterRouteMap route={route} roadPath={displayedRasterPath} focusPath={displayedFocusedPath} focusStatus={focusedRoadStatus} focusedTransportSegmentId={focusedTransportSegmentId} selectedPointId={selectedPointId} onSelectPoint={onSelectPoint} journalCards={journalCards} />}{status === 'loading' && <div className="absolute inset-0 grid place-items-center bg-[#d8f1ee]"><div className="rounded-2xl bg-white/90 px-5 py-4 text-sm font-black text-river shadow-soft">正在请求高德道路规划…</div></div>}{failed && <div role="alert" className="absolute left-4 right-4 top-20 z-30 rounded-2xl border border-red-200 bg-white/95 p-4 shadow-xl backdrop-blur"><div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500"/><div className="min-w-0 flex-1"><strong className="block text-sm text-red-700">道路规划失败，未绘制估算路线</strong><p className="mt-1 text-xs font-bold leading-5 text-ink/55">{message}；为避免误导，不会用点到点直线替代真实道路。</p></div><button type="button" onClick={() => { resetAmapJsApiLoader(); setRetryVersion((value) => value + 1); }} className="inline-flex shrink-0 items-center gap-1 rounded-full bg-ink px-3 py-2 text-xs font-black text-white"><RefreshCw className="h-3.5 w-3.5"/>重新规划</button></div></div>}</div>
       {!mapOnly&&<aside className="bg-[#fbfaf5] p-5">{selected&&<><div className="text-xs font-black tracking-[.16em] text-tower">STOP {route.points.findIndex(p=>p.id===selected.id)+1}</div><h4 className="mt-2 font-display text-3xl font-black">{selected.name}</h4><div className="mt-2 flex gap-2 text-xs font-bold text-ink/50"><span>{getPointTypeLabel(selected.type)}</span><span>·</span><span>{selected.time}</span><span>·</span><span>{selected.stayMinutes} 分钟</span></div><p className="mt-5 leading-7 text-ink/68">{selected.reason}</p><div className="mt-4 rounded-xl border-l-4 border-tower bg-white p-4 text-sm leading-6"><b>拍照：</b>{selected.photoTip}</div><div className="mt-3 rounded-xl bg-river/5 p-4 text-sm leading-6"><b>手账：</b>{selected.recordTip}</div></>}</aside>}
     </div>
   </section>;
@@ -367,12 +375,57 @@ function GaodeRasterRouteMap({ route, roadPath, focusPath, focusStatus, focusedT
   const points = route.points;
   const focusCoordinates = focusPath.length > 1 ? focusPath : points.map((point) => [point.lng, point.lat] as [number, number]);
   const bounds = getCoordinateBounds(focusCoordinates);
-  const zoom = focusPath.length > 1 ? rasterZoomForBounds(bounds) : 12;
-  const center = {
+  const fittedView = {
+    zoom: focusPath.length > 1 ? rasterZoomForBounds(bounds) : rasterZoomForBounds(bounds),
     lng: (bounds.minLng + bounds.maxLng) / 2,
     lat: (bounds.minLat + bounds.maxLat) / 2,
   };
-  const centerWorld = lngLatToWorld(center.lng, center.lat, zoom);
+  const fitSignature = `${route.id}:${focusCoordinates.map(([lng, lat]) => `${lng},${lat}`).join(';')}`;
+  const [view, setView] = useState(fittedView);
+  const pointerPositions = useRef(new Map<number, { x: number; y: number }>());
+  const dragOrigin = useRef<{ x: number; y: number } | null>(null);
+  const pinchOrigin = useRef<{ distance: number; zoom: number } | null>(null);
+  useEffect(() => setView(fittedView), [fitSignature]);
+  const zoom = view.zoom;
+  const centerWorld = lngLatToWorld(view.lng, view.lat, zoom);
+  const changeZoom = (delta: number) => setView((current) => ({ ...current, zoom: clampRasterZoom(current.zoom + delta) }));
+  const resetView = () => setView(fittedView);
+  const panByPixels = (deltaX: number, deltaY: number) => setView((current) => {
+    const world = lngLatToWorld(current.lng, current.lat, current.zoom);
+    const next = worldToLngLat(world.x - deltaX, world.y - deltaY, current.zoom);
+    return { ...current, ...next };
+  });
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    pointerPositions.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointerPositions.current.size === 1) dragOrigin.current = { x: event.clientX, y: event.clientY };
+    if (pointerPositions.current.size === 2) {
+      const [first, second] = [...pointerPositions.current.values()];
+      pinchOrigin.current = { distance: Math.hypot(second.x - first.x, second.y - first.y), zoom: view.zoom };
+      dragOrigin.current = null;
+    }
+  };
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!pointerPositions.current.has(event.pointerId)) return;
+    pointerPositions.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointerPositions.current.size >= 2) {
+      const [first, second] = [...pointerPositions.current.values()];
+      const distance = Math.hypot(second.x - first.x, second.y - first.y);
+      if (pinchOrigin.current?.distance) setView((current) => ({ ...current, zoom: clampRasterZoom(Math.round(pinchOrigin.current!.zoom + Math.log2(Math.max(0.25, distance / pinchOrigin.current!.distance)) * 2)) }));
+      return;
+    }
+    if (!dragOrigin.current) { dragOrigin.current = { x: event.clientX, y: event.clientY }; return; }
+    const deltaX = event.clientX - dragOrigin.current.x;
+    const deltaY = event.clientY - dragOrigin.current.y;
+    dragOrigin.current = { x: event.clientX, y: event.clientY };
+    panByPixels(deltaX, deltaY);
+  };
+  const handlePointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    pointerPositions.current.delete(event.pointerId);
+    pinchOrigin.current = null;
+    const remaining = [...pointerPositions.current.values()][0];
+    dragOrigin.current = remaining ? { ...remaining } : null;
+  };
   const projected = points.map((point) => {
     const world = lngLatToWorld(point.lng, point.lat, zoom);
     return {
@@ -405,7 +458,27 @@ function GaodeRasterRouteMap({ route, roadPath, focusPath, focusStatus, focusedT
   });
 
   return (
-    <div className="absolute inset-0 overflow-hidden bg-[#dce9e5]">
+    <div
+      aria-label="可缩放和拖动的高德路线地图"
+      role="application"
+      tabIndex={0}
+      className="absolute inset-0 touch-none overflow-hidden bg-[#dce9e5] outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-jade/50 cursor-grab active:cursor-grabbing"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerEnd}
+      onPointerCancel={handlePointerEnd}
+      onWheel={(event) => { event.preventDefault(); changeZoom(event.deltaY < 0 ? 1 : -1); }}
+      onDoubleClick={() => changeZoom(1)}
+      onKeyDown={(event) => {
+        if (event.key === '+' || event.key === '=') { event.preventDefault(); changeZoom(1); }
+        else if (event.key === '-') { event.preventDefault(); changeZoom(-1); }
+        else if (event.key === '0') { event.preventDefault(); resetView(); }
+        else if (event.key === 'ArrowLeft') { event.preventDefault(); panByPixels(80, 0); }
+        else if (event.key === 'ArrowRight') { event.preventDefault(); panByPixels(-80, 0); }
+        else if (event.key === 'ArrowUp') { event.preventDefault(); panByPixels(0, 80); }
+        else if (event.key === 'ArrowDown') { event.preventDefault(); panByPixels(0, -80); }
+      }}
+    >
       <div className="absolute left-1/2 top-1/2 h-[760px] w-[1120px] -translate-x-1/2 -translate-y-1/2">
         {tiles.map((tile) => (
           <img
@@ -446,7 +519,9 @@ function GaodeRasterRouteMap({ route, roadPath, focusPath, focusStatus, focusedT
         })}
       </div>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-white/55 to-transparent" />
-      <div className="absolute bottom-3 left-3 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black text-ink/60 shadow-sm">高德瓦片底图 · AutoNavi</div>
+      <div className="pointer-events-none absolute left-3 top-3 rounded-full bg-ink/82 px-3 py-1.5 text-[10px] font-black text-white shadow-sm backdrop-blur">拖动地图 · 滚轮/双指缩放</div>
+      <MapInteractionControls label={`高德瓦片地图，当前缩放 ${zoom} 级`} onZoomIn={() => changeZoom(1)} onZoomOut={() => changeZoom(-1)} onReset={resetView} />
+      <div className="pointer-events-none absolute bottom-3 left-3 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black text-ink/60 shadow-sm">高德瓦片底图 · {zoom} 级</div>
       <div className={`absolute bottom-3 right-3 rounded-full bg-white/92 px-3 py-1.5 text-xs font-black shadow-sm ${focusedTransportSegmentId ? 'text-tower' : hasRealRoad ? 'text-river' : 'text-ink/55'}`}>{focusedTransportSegmentId ? focusStatus === 'loading' ? '正在查询本段真实道路…' : focusPath.length > 1 ? '高德真实阶段路线' : '本段真实路线暂不可用' : hasRealRoad ? '高德后端动态道路规划' : '未绘制估算直线'}</div>
     </div>
   );
@@ -511,6 +586,15 @@ function FallbackRouteMap({ route, selectedPointId, onSelectPoint }: { route: Sm
   );
 }
 
+function MapInteractionControls({ label, onZoomIn, onZoomOut, onReset }: { label: string; onZoomIn: () => void; onZoomOut: () => void; onReset: () => void }) {
+  const stopPointer = (event: React.PointerEvent<HTMLDivElement>) => event.stopPropagation();
+  return <div aria-label={label} className="absolute right-3 top-3 z-40 flex flex-col overflow-hidden rounded-[1rem] border border-white/70 bg-white/94 text-ink shadow-[0_12px_28px_rgba(18,34,42,.18)] backdrop-blur" onPointerDown={stopPointer} onDoubleClick={(event) => event.stopPropagation()}>
+    <button type="button" aria-label="放大地图" onClick={onZoomIn} className="grid h-10 w-10 place-items-center border-b border-ink/8 text-river transition hover:bg-river hover:text-white active:scale-95"><Plus className="h-5 w-5" /></button>
+    <button type="button" aria-label="缩小地图" onClick={onZoomOut} className="grid h-10 w-10 place-items-center border-b border-ink/8 text-river transition hover:bg-river hover:text-white active:scale-95"><Minus className="h-5 w-5" /></button>
+    <button type="button" aria-label="显示完整路线" onClick={onReset} className="grid h-10 w-10 place-items-center text-tower transition hover:bg-tower hover:text-white active:scale-95"><LocateFixed className="h-[18px] w-[18px]" /></button>
+  </div>;
+}
+
 function getCoordinateBounds(points: Array<[number, number]>) {
   return points.reduce((bounds, [lng, lat]) => ({
     minLng: Math.min(bounds.minLng, lng),
@@ -538,4 +622,14 @@ function lngLatToWorld(lng: number, lat: number, zoom: number) {
     y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * size,
   };
 }
+
+function worldToLngLat(x: number, y: number, zoom: number) {
+  const size = 256 * 2 ** zoom;
+  const lng = x / size * 360 - 180;
+  const mercator = Math.PI * (1 - 2 * y / size);
+  const lat = 180 / Math.PI * Math.atan(Math.sinh(mercator));
+  return { lng, lat: Math.max(-85, Math.min(85, lat)) };
+}
+
+function clampRasterZoom(zoom: number) { return Math.max(4, Math.min(18, Math.round(zoom))); }
 

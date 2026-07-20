@@ -1,4 +1,4 @@
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { baseRoutes } from '../data/routeData';
 import type { TransportPlanResponse } from '../services/transportService';
@@ -9,7 +9,7 @@ const amapMocks = vi.hoisted(() => {
     add: vi.fn(), remove: vi.fn(), clearMap: vi.fn(), destroy: vi.fn(), resize: vi.fn(),
     setFitView: vi.fn(), setFeatures: vi.fn(), setMapStyle: vi.fn(), setZoomAndCenter: vi.fn(),
   };
-  const Map = vi.fn(function Map() { return mapInstance; });
+  const Map = vi.fn(function Map(_container: unknown, _options: Record<string, unknown>) { return mapInstance; });
   const planBackendDrivingRoute = vi.fn();
   return { mapInstance, Map, planBackendDrivingRoute };
 });
@@ -47,6 +47,7 @@ describe('RouteMap lifecycle', () => {
     const common = { selectedPointId: route.points[0].id, activePointIndex: 0, navigating: false, mapOnly: true } as const;
     const view = render(<RouteMap route={route} {...common} onSelectPoint={() => undefined} />);
     await waitFor(() => expect(amapMocks.Map).toHaveBeenCalledTimes(1));
+    expect(amapMocks.Map.mock.calls[0][1]).toMatchObject({ dragEnable: true, zoomEnable: true, scrollWheel: true, touchZoom: true, doubleClickZoom: true, keyboardEnable: true });
 
     const transportPlan = {
       source: 'transport-api', freshness: 'live-query', sourceLabel: '高德动态公交规划', generatedAt: new Date().toISOString(),
@@ -58,6 +59,20 @@ describe('RouteMap lifecycle', () => {
     await waitFor(() => expect(amapMocks.mapInstance.add).toHaveBeenCalled());
     expect(amapMocks.Map).toHaveBeenCalledTimes(1);
     expect(amapMocks.mapInstance.destroy).not.toHaveBeenCalled();
+  });
+
+  it('keeps the raster map pannable and zoomable when the browser JS map is unavailable', async () => {
+    vi.stubEnv('VITE_AMAP_ENABLED', 'false');
+    const route = { ...baseRoutes.武汉, startPoint: baseRoutes.武汉.points[0] };
+    const view = render(<RouteMap route={route} selectedPointId={route.points[0].id} activePointIndex={0} navigating={false} mapOnly onSelectPoint={() => undefined} />);
+
+    const map = await view.findByRole('application', { name: '可缩放和拖动的高德路线地图' });
+    const initialLabel = view.getByLabelText(/高德瓦片地图，当前缩放/).getAttribute('aria-label');
+    fireEvent.click(view.getByRole('button', { name: '放大地图' }));
+    await waitFor(() => expect(view.getByLabelText(/高德瓦片地图，当前缩放/).getAttribute('aria-label')).not.toBe(initialLabel));
+    expect(view.getByRole('button', { name: '放大地图' })).toBeInTheDocument();
+    expect(view.getByRole('button', { name: '缩小地图' })).toBeInTheDocument();
+    expect(view.getByRole('button', { name: '显示完整路线' })).toBeInTheDocument();
   });
 
   it('uses late transport geometry on the same map when the driving request fails', async () => {
