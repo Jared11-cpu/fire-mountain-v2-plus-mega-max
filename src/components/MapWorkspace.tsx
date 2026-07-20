@@ -645,14 +645,52 @@ function TransportSegmentCard({ segment, index, expanded, hasRealGeometry, onTog
       </span>
       <span className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-river/8 px-2.5 py-1 text-[10px] font-black text-river">全程 {formatTransportDistance(segment.distanceKm)}</span><span className="rounded-full bg-jade/10 px-2.5 py-1 text-[10px] font-black text-jade">费用 {segment.costEstimate}</span></span>
     </button>
-    {expanded && <div className="border-t border-tower/10 bg-gradient-to-b from-[#fffaf7] to-[#f7faf8] px-4 py-4">
-      <div className="mb-3 flex items-center justify-between gap-3"><span className="inline-flex items-center gap-1.5 text-[10px] font-black text-tower"><Navigation className="h-3.5 w-3.5" />{hasRealGeometry ? '地图已显示高德真实路线' : '地图仅接受高德真实道路'}</span><span className="rounded-full bg-white px-2 py-1 text-[9px] font-black text-ink/40 shadow-sm">点击卡片收起</span></div>
-      {!hasRealGeometry && <p className="mb-3 rounded-xl border border-tower/10 bg-tower/[0.06] p-3 text-[10px] font-bold leading-5 text-ink/58">该段会按起终点单独请求高德真实道路；若服务失败，地图不会用红色直线代替。</p>}
-      {segment.instruction && <p className="mb-3 rounded-xl bg-white p-3 text-[11px] font-bold leading-5 text-ink/60 shadow-sm">{segment.instruction}</p>}
-      <div className="space-y-2">{segment.legs.map((leg, legIndex) => <TransitLegRow key={leg.id} leg={leg} last={legIndex === segment.legs.length - 1} />)}</div>
-      {!segment.legs.length && <p className="text-[11px] font-bold leading-5 text-ink/55">暂无更细分的线路信息，出发前请在高德地图复核。</p>}
-    </div>}
+    {expanded && <TransportExpandedDetails segment={segment} hasRealGeometry={hasRealGeometry} />}
   </article>;
+}
+
+function TransportExpandedDetails({ segment, hasRealGeometry }: { segment: TransportSegment; hasRealGeometry: boolean }) {
+  const walkingLegs = segment.legs.filter((leg) => leg.mode === 'walk');
+  const walkingDistance = walkingLegs.reduce((sum, leg) => sum + leg.distanceKm, 0);
+  const walkingMinutes = walkingLegs.reduce((sum, leg) => sum + leg.durationMinutes, 0);
+  const namedLines = segment.legs.map((leg) => leg.lineName).filter((value): value is string => Boolean(value));
+  const hasStepInstructions = segment.legs.some((leg) => (leg.instructions?.length ?? 0) > 0 || (leg.roadNames?.length ?? 0) > 0);
+  let elapsedMinutes = 0;
+  return <div className="border-t border-ink/8 bg-[#f6f8f7] px-3 py-3 sm:px-4 sm:py-4">
+    <div className="overflow-hidden rounded-[1.4rem] border border-ink/8 bg-white shadow-[0_14px_36px_rgba(18,34,42,.08)]">
+      <div className="grid grid-cols-3 divide-x divide-ink/8 px-2 py-4 sm:px-3">
+        <TransportMetric label="行程用时" value={`${segment.durationMinutes}`} unit="分钟" />
+        <TransportMetric label="步行" value={walkingDistance > 0 ? formatTransportDistance(walkingDistance) : '无需'} sub={walkingMinutes > 0 ? `约 ${walkingMinutes} 分钟` : '本段无步行'} />
+        <TransportMetric label="预计到达" value={segment.arrivalTime} sub={`${segment.departureTime} 出发`} />
+      </div>
+      <div className="flex flex-wrap items-center gap-2 border-t border-ink/8 px-3 py-3 sm:px-4">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1.5 text-[10px] font-black text-white">{transportIcon(segment.mode)}{namedLines[0] || segment.mode}</span>
+        {namedLines.length > 1 && <span className="min-w-0 flex-1 truncate text-[10px] font-bold text-ink/45">{namedLines.slice(1).join(' → ')}</span>}
+        <span className="rounded-full bg-jade/10 px-2.5 py-1.5 text-[10px] font-black text-jade">{segment.costEstimate}</span>
+      </div>
+    </div>
+
+    <div className="mt-3 flex items-center justify-between gap-3 px-1">
+      <span className={`inline-flex items-center gap-1.5 text-[10px] font-black ${hasRealGeometry ? 'text-river' : 'text-amber-700'}`}><Navigation className="h-3.5 w-3.5" />{hasRealGeometry ? '地图已同步本次高德路线' : '详细道路等待高德返回'}</span>
+      <span className="text-[9px] font-black text-ink/35">{segment.liveStatus ?? '线路待动态查询'}</span>
+    </div>
+
+    <div className="mt-3 space-y-2.5">
+      {segment.legs.map((leg, legIndex) => {
+        const startTime = addTransportClock(segment.departureTime, elapsedMinutes);
+        elapsedMinutes += leg.durationMinutes;
+        const endTime = legIndex === segment.legs.length - 1 ? segment.arrivalTime : addTransportClock(segment.departureTime, elapsedMinutes);
+        return <TransitLegRow key={leg.id} leg={leg} startTime={startTime} endTime={endTime} />;
+      })}
+    </div>
+    {!segment.legs.length && <p className="mt-3 rounded-2xl border border-dashed border-ink/12 bg-white p-4 text-[11px] font-bold leading-5 text-ink/55">暂无可核验的线路信息，请刷新查询后再查看。</p>}
+    {!hasStepInstructions && segment.instruction && <p className="mt-3 rounded-xl bg-white px-3 py-2.5 text-[9px] font-bold leading-4 text-ink/48 shadow-sm">{segment.instruction}</p>}
+    {!hasRealGeometry && <p className="mt-3 px-1 text-[9px] font-bold leading-4 text-ink/38">不会用直线或虚构站点代替真实道路；恢复查询后自动补全。</p>}
+  </div>;
+}
+
+function TransportMetric({ label, value, unit, sub }: { label: string; value: string; unit?: string; sub?: string }) {
+  return <div className="min-w-0 px-2 sm:px-3"><span className="block text-[8px] font-black tracking-[0.12em] text-ink/35">{label}</span><strong className="mt-1 block truncate font-display text-lg font-black tabular-nums text-ink sm:text-xl">{value}{unit && <small className="ml-0.5 text-[9px]">{unit}</small>}</strong>{sub && <small className="mt-0.5 block truncate text-[8px] font-bold text-ink/38">{sub}</small>}</div>;
 }
 
 function TransportLegPreview({ leg }: { leg: TransportLeg }) {
@@ -683,7 +721,54 @@ export function getTransportSegmentAriaLabel(segment: TransportSegment, index: n
   return `${expanded ? '收起' : '展开并在地图高亮'}第 ${index + 1} 段交通详情；${segment.departureTime} 出发，${segment.arrivalTime} 到达；${route}；费用 ${segment.costEstimate}`;
 }
 
-function TransitLegRow({ leg, last }: { leg: TransportLeg; last: boolean }) { const label = leg.mode === 'subway' ? '地铁' : leg.mode === 'bus' ? '公交' : leg.mode === 'walk' ? '步行' : leg.mode === 'railway' ? '铁路' : leg.mode === 'taxi' ? '驾车' : '接驳'; return <div className="relative flex gap-3 pb-1"><div className="relative flex w-7 shrink-0 justify-center"><span className={`z-10 grid h-7 w-7 place-items-center rounded-full ${leg.mode === 'subway' ? 'bg-tower text-white' : leg.mode === 'bus' ? 'bg-river text-white' : 'bg-white text-ink/45 shadow-sm'}`}>{legIcon(leg.mode)}</span>{!last && <span className="absolute bottom-[-10px] top-6 w-px bg-ink/15" />}</div><div className="min-w-0 flex-1 pb-2"><div className="flex flex-wrap items-center gap-2"><strong className="text-[11px]">{leg.lineName || label}</strong><span className="text-[9px] font-black text-ink/40">{leg.durationMinutes} 分钟 · {formatTransportDistance(leg.distanceKm)}{leg.fare === undefined ? '' : ` · 约 ¥${leg.fare}`}</span></div>{(leg.departureStop || leg.arrivalStop) && <p className="mt-1 text-[10px] font-bold text-ink/55">{leg.entrance ? `${leg.entrance}进站 · ` : ''}{leg.departureStop ?? '起点'}上车 → {leg.arrivalStop ?? '终点'}下车{leg.exit ? ` · ${leg.exit}出站` : ''}</p>}{leg.roadNames && leg.roadNames.length > 0 && <p className="mt-1 text-[10px] font-bold text-river">途经道路：{leg.roadNames.slice(0, 5).join(' → ')}{leg.roadNames.length > 5 ? '…' : ''}</p>}{leg.instructions && leg.instructions.length > 0 && <div className="mt-1.5 space-y-1">{leg.instructions.slice(0, 3).map((instruction, index) => <p key={`${leg.id}-instruction-${index}`} className="rounded-lg bg-white px-2 py-1.5 text-[9px] font-bold leading-4 text-ink/50 shadow-sm">{index + 1}. {instruction}</p>)}</div>}{leg.viaStops.length > 0 && <p className="mt-1 text-[9px] font-bold text-ink/35">途经 {leg.viaStops.length} 站：{leg.viaStops.slice(0, 6).join('、')}{leg.viaStops.length > 6 ? '…' : ''}</p>}{(leg.serviceStartTime || leg.serviceEndTime) && <p className="mt-1 text-[9px] font-bold text-jade">运营 {leg.serviceStartTime ?? '—'}–{leg.serviceEndTime ?? '—'}</p>}</div></div>; }
+export function getTransportLegStations(leg: TransportLeg) {
+  return [leg.departureStop, ...leg.viaStops, leg.arrivalStop].filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index);
+}
+
+function TransitLegRow({ leg, startTime, endTime }: { leg: TransportLeg; startTime: string; endTime: string }) {
+  const [showStops, setShowStops] = useState(true);
+  const label = leg.mode === 'subway' ? '地铁' : leg.mode === 'bus' ? '公交' : leg.mode === 'walk' ? '步行' : leg.mode === 'railway' ? '铁路' : leg.mode === 'taxi' ? '驾车' : '接驳';
+  const stations = getTransportLegStations(leg);
+  const viaStations = stations.slice(1, -1);
+  const transit = leg.mode === 'subway' || leg.mode === 'bus' || leg.mode === 'railway' || leg.mode === 'shuttle';
+  const theme = transportLegTheme(leg.mode);
+
+  if (leg.mode === 'walk') return <section className="flex gap-3 rounded-[1.2rem] border border-ink/8 bg-white p-3.5">
+    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-ink/5 text-ink/55"><Footprints className="h-4 w-4" /></span>
+    <div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-3"><strong className="text-[12px] font-black">步行 {formatTransportDistance(leg.distanceKm)}</strong><span className="text-[9px] font-black tabular-nums text-ink/38">{startTime}–{endTime}</span></div><p className="mt-1 text-[10px] font-bold leading-5 text-ink/52">{leg.instructions?.[0] || (leg.roadNames?.length ? `沿 ${leg.roadNames.slice(0, 3).join('、')} 步行` : `约 ${leg.durationMinutes} 分钟`)}</p></div>
+  </section>;
+
+  if (!transit) return <section className="overflow-hidden rounded-[1.2rem] border border-ink/8 bg-white">
+    <div className="flex items-start gap-3 p-3.5"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-ink text-white">{legIcon(leg.mode)}</span><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div><span className="block text-[8px] font-black tracking-[0.12em] text-ink/35">{label} · {startTime}–{endTime}</span><strong className="mt-1 block text-[13px] font-black">{leg.lineName || '按本次规划行驶'}</strong></div><span className="shrink-0 rounded-full bg-jade/10 px-2 py-1 text-[9px] font-black text-jade">{leg.fare === undefined ? `${leg.durationMinutes} 分钟` : `约 ¥${leg.fare}`}</span></div>{leg.roadNames && leg.roadNames.length > 0 && <p className="mt-2 text-[10px] font-black leading-5 text-river">{leg.roadNames.slice(0, 6).join(' → ')}{leg.roadNames.length > 6 ? '…' : ''}</p>}</div></div>
+    {leg.instructions && leg.instructions.length > 0 && <ol className="border-t border-ink/8 px-3.5 py-2.5">{leg.instructions.slice(0, 4).map((instruction, index) => <li key={`${leg.id}-instruction-${index}`} className="flex gap-2 py-1 text-[9px] font-bold leading-4 text-ink/48"><span className="text-river">{String(index + 1).padStart(2, '0')}</span><span>{instruction}</span></li>)}</ol>}
+  </section>;
+
+  return <section className="overflow-hidden rounded-[1.2rem] border border-ink/8 bg-white">
+    <div className="flex items-start gap-3 p-3.5"><span className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl text-white ${theme.badge}`}>{legIcon(leg.mode)}</span><div className="min-w-0 flex-1"><span className="block text-[8px] font-black tracking-[0.12em] text-ink/35">{label} · {startTime}–{endTime}</span><div className="mt-1 flex flex-wrap items-center gap-2"><strong className="text-[13px] font-black text-ink">{leg.lineName || `${label}线路待查询`}</strong>{leg.lineType && <span className="text-[8px] font-bold text-ink/35">{leg.lineType}</span>}</div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[9px] font-black text-ink/42"><span>{stations.length > 1 ? `经过 ${Math.max(1, stations.length - 1)} 站` : '站点待查询'}</span><span>{leg.durationMinutes} 分钟</span><span>{formatTransportDistance(leg.distanceKm)}</span>{leg.fare !== undefined && <span className="text-jade">约 ¥{leg.fare}</span>}</div></div></div>
+    {stations.length > 1 ? <div className="border-t border-ink/8 px-3.5 py-3">
+      <div className="relative pl-8">
+        <span className={`absolute bottom-3 left-[9px] top-3 w-[3px] rounded-full ${theme.line}`} />
+        <StationRow name={stations[0]} detail={`${leg.entrance ? `${leg.entrance}进站 · ` : ''}${startTime} 上车`} terminal={false} theme={theme} />
+        {viaStations.length > 0 && <div className="my-1"><button type="button" aria-expanded={showStops} onClick={() => setShowStops((value) => !value)} className="flex w-full items-center justify-between rounded-xl bg-ink/[0.035] px-3 py-2 text-left text-[9px] font-black text-ink/48"><span>{showStops ? '收起' : '展开'}途经 {viaStations.length} 站</span><ChevronDown className={`h-3.5 w-3.5 transition ${showStops ? 'rotate-180' : ''}`} /></button>{showStops && <div className="max-h-52 overflow-y-auto py-1 pr-1">{viaStations.map((station, index) => <div key={`${leg.id}-station-${station}-${index}`} className="relative flex min-h-8 items-center border-b border-ink/[0.045] py-1.5 last:border-0"><span className={`absolute -left-[27px] h-2.5 w-2.5 rounded-full border-2 border-white ${theme.dot}`} /><span className="text-[10px] font-bold text-ink/58">{station}</span></div>)}</div>}</div>}
+        <StationRow name={stations[stations.length - 1]} detail={`${endTime} 下车${leg.exit ? ` · ${leg.exit}出站` : ''}`} terminal theme={theme} />
+      </div>
+      {(leg.serviceStartTime || leg.serviceEndTime) && <p className="mt-3 border-t border-ink/8 pt-2 text-[8px] font-black text-ink/35">运营时间 {leg.serviceStartTime ?? '—'}–{leg.serviceEndTime ?? '—'}，出发前请再次核验</p>}
+    </div> : <p className="border-t border-dashed border-ink/10 px-3.5 py-3 text-[10px] font-bold text-amber-700">高德暂未返回上下车站与途经站，不展示模拟站点。</p>}
+  </section>;
+}
+
+function StationRow({ name, detail, terminal, theme }: { name: string; detail: string; terminal: boolean; theme: ReturnType<typeof transportLegTheme> }) {
+  return <div className="relative py-2"><span className={`absolute -left-8 top-3 grid h-5 w-5 place-items-center rounded-full border-[3px] border-white shadow-sm ${terminal ? 'bg-tower' : theme.dot}`}>{terminal && <span className="h-1.5 w-1.5 rounded-full bg-white" />}</span><strong className="block text-[12px] font-black text-ink">{name}</strong><span className="mt-0.5 block text-[9px] font-bold text-ink/42">{detail}</span></div>;
+}
+
+function transportLegTheme(mode: TransportLeg['mode']) {
+  if (mode === 'subway') return { badge: 'bg-tower', line: 'bg-tower', dot: 'bg-tower' };
+  if (mode === 'railway') return { badge: 'bg-amber-500', line: 'bg-amber-500', dot: 'bg-amber-500' };
+  if (mode === 'bus' || mode === 'shuttle') return { badge: 'bg-river', line: 'bg-river', dot: 'bg-river' };
+  return { badge: 'bg-ink', line: 'bg-ink/35', dot: 'bg-ink/45' };
+}
+
+export function addTransportClock(value: string, deltaMinutes: number) { const [hour, minute] = value.split(':').map(Number); const total = (((hour || 0) * 60 + (minute || 0) + deltaMinutes) % 1440 + 1440) % 1440; return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`; }
 function legIcon(mode: TransportLeg['mode']) { if (mode === 'walk') return <Footprints className="h-3.5 w-3.5" />; if (mode === 'subway' || mode === 'railway') return <TrainFront className="h-3.5 w-3.5" />; if (mode === 'taxi') return <CarFront className="h-3.5 w-3.5" />; return <Bus className="h-3.5 w-3.5" />; }
 function transportIcon(mode: TransportMode) { if (mode === '步行') return <Footprints className="h-4 w-4" />; if (mode === '地铁' || mode === '铁路') return <TrainFront className="h-4 w-4" />; if (mode === '公交' || mode === '公共交通') return <Bus className="h-4 w-4" />; if (mode === '景区专线') return <RouteIcon className="h-4 w-4" />; return <CarFront className="h-4 w-4" />; }
 

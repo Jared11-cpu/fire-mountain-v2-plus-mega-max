@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { baseRoutes } from '../data/routeData';
 import type { TransportPlanResponse, TransportSegment } from '../services/transportService';
-import { compactTravelTip, formatTransportDistance, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointDetailLinks, getPointPrimaryDetailLink, getPointServiceLinks, getRailwayStationTimetableUrl, getTransportLegPreview, getTransportSegmentAriaLabel, getVerifiedCtripDetailUrl, getXiaohongshuGuideUrl, isDirectCtripDetailUrl, normalizeActualStayMinutes, normalizeTravelMinutes, recalculateEditableTimeline } from './MapWorkspace';
+import { addTransportClock, compactTravelTip, formatTransportDistance, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointDetailLinks, getPointPrimaryDetailLink, getPointServiceLinks, getRailwayStationTimetableUrl, getTransportLegPreview, getTransportLegStations, getTransportSegmentAriaLabel, getVerifiedCtripDetailUrl, getXiaohongshuGuideUrl, isDirectCtripDetailUrl, normalizeActualStayMinutes, normalizeTravelMinutes, recalculateEditableTimeline } from './MapWorkspace';
 import { getFocusedTransportPath, getFocusedTransportSegmentPoints } from './RouteMap';
 
 describe('getPointServiceLinks', () => {
@@ -177,6 +177,11 @@ describe('AMap-style transport segment summaries', () => {
 
   it('shows named roads and turn guidance for a driving leg', () => {
     expect(getTransportLegPreview({ id: 'drive', mode: 'taxi', lineName: '驾车路线', viaStops: [], durationMinutes: 18, distanceKm: 9.4, fare: 28, roadNames: ['东山大道', '桔城路'], instructions: ['沿东山大道向西行驶'], polyline: [] })).toEqual({ headline: '经 东山大道 → 桔城路', detail: '沿东山大道向西行驶', meta: '约 ¥28' });
+  });
+
+  it('builds a complete ordered station timeline without duplicate terminals', () => {
+    expect(getTransportLegStations({ id: 'line', mode: 'subway', departureStop: '武汉站东广场', arrivalStop: '光谷广场', viaStops: ['洪山广场', '街道口', '光谷广场'], durationMinutes: 32, distanceKm: 16, polyline: [] })).toEqual(['武汉站东广场', '洪山广场', '街道口', '光谷广场']);
+    expect(addTransportClock('23:55', 18)).toBe('00:13');
   });
 
   it('includes time, route, and fare in the accessible card label', () => {
