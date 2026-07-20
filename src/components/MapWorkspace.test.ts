@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { baseRoutes } from '../data/routeData';
+import type { PlannedRoutePoint } from '../domain/trip';
 import type { TransportPlanResponse, TransportSegment } from '../services/transportService';
-import { addTransportClock, compactTravelTip, formatTransportDistance, getAmapRouteUrl, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointDetailLinks, getPointPrimaryDetailLink, getPointServiceLinks, getRailwayStationTimetableUrl, getTransportLegPreview, getTransportLegStations, getTransportSegmentAriaLabel, getVerifiedCtripDetailUrl, getXiaohongshuGuideUrl, isDirectCtripDetailUrl, normalizeActualStayMinutes, normalizeTravelMinutes, recalculateEditableTimeline } from './MapWorkspace';
+import { addTransportClock, alignTransportDepartureTime, compactTravelTip, formatTransportDistance, getAmapRouteUrl, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointDetailLinks, getPointPrimaryDetailLink, getPointServiceLinks, getRailwayStationTimetableUrl, getTransportLegPreview, getTransportLegStations, getTransportSegmentAriaLabel, getTransportSegmentCompactSummary, getVerifiedCtripDetailUrl, getXiaohongshuGuideUrl, isDirectCtripDetailUrl, normalizeActualStayMinutes, normalizeTravelMinutes, recalculateEditableTimeline } from './MapWorkspace';
 import { getFocusedTransportPath, getFocusedTransportSegmentPoints } from './RouteMap';
 
 describe('getPointServiceLinks', () => {
@@ -198,6 +199,26 @@ describe('AMap-style transport segment summaries', () => {
     expect(url.searchParams.get('mode')).toBe('bus');
     expect(url.searchParams.get('policy')).toBe('1');
     expect(url.searchParams.get('callnative')).toBe('1');
+  });
+
+  it('shifts the whole transport schedule so the first segment uses the custom departure time', () => {
+    const points = [
+      { id: 'a', name: '武汉站', lat: 30.6, lng: 114.4, arrivalTime: '08:45', time: '08:45', durationMinutes: 10, travelMinutesToNext: 42, stayMinutes: 10 },
+      { id: 'b', name: '东湖', lat: 30.5, lng: 114.3, arrivalTime: '09:37', time: '09:37', durationMinutes: 60, travelMinutesToNext: 0, stayMinutes: 60 },
+    ] as PlannedRoutePoint[];
+    const shifted = alignTransportDepartureTime(points, '09:20');
+    expect(addTransportClock(shifted[0].arrivalTime, shifted[0].durationMinutes)).toBe('09:20');
+    expect(shifted[1].arrivalTime).toBe('10:02');
+  });
+
+  it('keeps dense multi-line transit routes to two visible summary items', () => {
+    const segment: TransportSegment = { id: 'dense', from: 'A', to: 'B', departureTime: '10:37', arrivalTime: '11:22', durationMinutes: 45, distanceKm: 6.6, mode: '公交', costEstimate: '¥4', instruction: '', legs: [
+      { id: 'walk', mode: 'walk', viaStops: [], durationMinutes: 9, distanceKm: 0.8, polyline: [] },
+      { id: '531', mode: 'bus', lineName: '531路', viaStops: [], durationMinutes: 8, distanceKm: 1, polyline: [] },
+      { id: '589', mode: 'bus', lineName: '589路', viaStops: [], durationMinutes: 8, distanceKm: 1, polyline: [] },
+      { id: '791', mode: 'bus', lineName: '791路', viaStops: [], durationMinutes: 8, distanceKm: 1, polyline: [] },
+    ] };
+    expect(getTransportSegmentCompactSummary(segment)).toEqual({ items: ['步行 800 米', '531路'], hiddenCount: 2, walkingDistanceKm: 0.8 });
   });
 });
 

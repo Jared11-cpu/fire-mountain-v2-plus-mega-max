@@ -73,7 +73,7 @@ export type TripPlan = {
   requestSnapshot: TripRequest;
   content: TravelPlan;
   route: SmartRoute & { points: PlannedRoutePoint[] };
-  settings: { targetPointCount: number; targetDurationMinutes: number; departureTime: string };
+  settings: { targetPointCount: number; targetDurationMinutes: number; departureTime: string; transportDepartureTime?: string };
   budgetItems: BudgetItem[];
   dailyRecords: DailyRecord[];
   pointNotes: Record<string, string>;
@@ -238,7 +238,7 @@ export function generateTripPlan(requestInput: TripRequest, previous?: TripPlan 
     requestSnapshot: request,
     content,
     route,
-    settings: { targetPointCount, targetDurationMinutes: totalPlanMinutes(points), departureTime },
+    settings: { targetPointCount, targetDurationMinutes: totalPlanMinutes(points), departureTime, transportDepartureTime: previous?.settings.transportDepartureTime },
     budgetItems: previous?.budgetItems ?? content.budget.map((row, index) => ({ ...row, id: `budget-${index}`, amount: 0, note: '' })),
     dailyRecords,
     pointNotes: previous?.pointNotes ?? {},

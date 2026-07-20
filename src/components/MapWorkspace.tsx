@@ -33,10 +33,13 @@ export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, n
   const transportPlan = transportComparison?.options.find((option) => option.id === transportChoiceId)?.plan ?? null;
   const loadTransport = useCallback((signal?: AbortSignal, silent = false) => {
     if (!silent) setTransportLoading(true);
-    return resolveTransportComparison(toTransportPlanRequest(request, tripPlan?.route.points as PlannedRoutePoint[] ?? [], tripPlan?.settings.departureTime ?? '08:30', transportStrategy), { signal })
+    const routePoints = tripPlan?.route.points as PlannedRoutePoint[] ?? [];
+    const customDepartureTime = tripPlan?.settings.transportDepartureTime;
+    const transportPoints = customDepartureTime ? alignTransportDepartureTime(routePoints, customDepartureTime) : routePoints;
+    return resolveTransportComparison(toTransportPlanRequest(request, transportPoints, customDepartureTime ?? tripPlan?.settings.departureTime ?? '08:30', transportStrategy), { signal })
       .then((result) => { setTransportComparison(result); setTransportChoiceId((current) => current === 'transit' ? 'transit' : result.recommendedOptionId); setFocusedTransportSegmentId(null); })
       .finally(() => { if (!signal?.aborted) setTransportLoading(false); });
-  }, [request, tripPlan?.route.points, tripPlan?.settings.departureTime, transportStrategy]);
+  }, [request, tripPlan?.route.points, tripPlan?.settings.departureTime, tripPlan?.settings.transportDepartureTime, transportStrategy]);
   useEffect(() => {
     const controller = new AbortController();
     loadTransport(controller.signal).catch(() => undefined);
@@ -101,7 +104,7 @@ export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, n
           {tab === 'stops' && <Stops points={route.points as PlannedRoutePoint[]} selectedId={selectedPointId} fallbackImageUrl={imageUrl} dailyRecords={tripPlan.dailyRecords} maxDays={request.days} onSelect={onSelectPoint} onPatchPoint={patchRoutePoint} onPatchNote={(id, note) => patchPlan((value) => ({ ...value, pointNotes: { ...value.pointNotes, [id]: note } }))} notes={tripPlan.pointNotes} />}
           {tab === 'days' && <Days plan={tripPlan} entries={journalEntries} onPatch={patchPlan} onEntries={setJournalEntries} onNotify={notify} />}
           {tab === 'weather' && <Weather request={request} lat={route.points[0]?.lat} lng={route.points[0]?.lng} />}
-          {tab === 'transport' && <Transport comparison={transportComparison} selectedId={transportChoiceId} focusedSegmentId={focusedTransportSegmentId} loading={transportLoading} strategy={transportStrategy} onSelect={(id) => { setTransportChoiceId(id); setFocusedTransportSegmentId(null); }} onFocusSegment={setFocusedTransportSegmentId} onStrategy={(nextStrategy) => { setTransportChoiceId('transit'); setFocusedTransportSegmentId(null); setTransportStrategy(nextStrategy); }} onReload={() => loadTransport().catch(() => undefined)} onSimulate={onSimulateNavigation} />}
+          {tab === 'transport' && <Transport comparison={transportComparison} selectedId={transportChoiceId} focusedSegmentId={focusedTransportSegmentId} loading={transportLoading} strategy={transportStrategy} departureTime={tripPlan.settings.transportDepartureTime ?? transportPlan?.segments[0]?.departureTime ?? tripPlan.settings.departureTime} onDepartureTime={(departureTime) => { updatePlanSettings({ transportDepartureTime: departureTime }); notify(`已将首段出发时间改为 ${departureTime}，正在重新计算到达时间。`, 'success'); }} onSelect={(id) => { setTransportChoiceId(id); setFocusedTransportSegmentId(null); }} onFocusSegment={setFocusedTransportSegmentId} onStrategy={(nextStrategy) => { setTransportChoiceId('transit'); setFocusedTransportSegmentId(null); setTransportStrategy(nextStrategy); }} onReload={() => loadTransport().catch(() => undefined)} onSimulate={onSimulateNavigation} />}
           {tab === 'food' && <Food plan={tripPlan} />}
           {tab === 'budget' && <Budget items={tripPlan.budgetItems} target={request.budget} days={request.days} onChange={updateBudgetItems} />}
         </div>
@@ -368,6 +371,17 @@ export function recalculateEditableTimeline(points: PlannedRoutePoint[], departu
   });
 }
 
+export function alignTransportDepartureTime(points: PlannedRoutePoint[], departureTime: string): PlannedRoutePoint[] {
+  const first = points[0];
+  if (!first || !/^\d{2}:\d{2}$/.test(departureTime)) return points;
+  const currentDeparture = addTransportClock(first.arrivalTime, first.durationMinutes);
+  const toMinutesOfDay = (value: string) => { const [hour, minute] = value.split(':').map(Number); return (hour || 0) * 60 + (minute || 0); };
+  let deltaMinutes = toMinutesOfDay(departureTime) - toMinutesOfDay(currentDeparture);
+  if (deltaMinutes > 720) deltaMinutes -= 1440;
+  if (deltaMinutes < -720) deltaMinutes += 1440;
+  return points.map((point) => ({ ...point, arrivalTime: addTransportClock(point.arrivalTime, deltaMinutes), time: addTransportClock(point.time, deltaMinutes) }));
+}
+
 function formatTimelineClock(totalMinutes: number) {
   const normalized = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
   return `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`;
@@ -586,10 +600,15 @@ const transitStrategies: Array<{ id: TransitStrategy; label: string; icon: typeo
 
 function getTransitStrategyLabel(strategy: TransitStrategy) { return transitStrategies.find((item) => item.id === strategy)?.label ?? '推荐'; }
 
-function Transport({ comparison, selectedId, focusedSegmentId, loading, strategy, onSelect, onFocusSegment, onStrategy, onReload, onSimulate }: { comparison: TransportComparison | null; selectedId: TransportChoiceId; focusedSegmentId: string | null; loading: boolean; strategy: TransitStrategy; onSelect: (id: TransportChoiceId) => void; onFocusSegment: (id: string | null) => void; onStrategy: (strategy: TransitStrategy) => void; onReload: () => void; onSimulate?: () => void }) {
+function Transport({ comparison, selectedId, focusedSegmentId, loading, strategy, departureTime, onDepartureTime, onSelect, onFocusSegment, onStrategy, onReload, onSimulate }: { comparison: TransportComparison | null; selectedId: TransportChoiceId; focusedSegmentId: string | null; loading: boolean; strategy: TransitStrategy; departureTime: string; onDepartureTime: (departureTime: string) => void; onSelect: (id: TransportChoiceId) => void; onFocusSegment: (id: string | null) => void; onStrategy: (strategy: TransitStrategy) => void; onReload: () => void; onSimulate?: () => void }) {
   const selected = comparison?.options.find((option) => option.id === selectedId) ?? comparison?.options[0];
   const transport = selected?.plan ?? null;
+  const [draftDepartureTime, setDraftDepartureTime] = useState(departureTime);
+  useEffect(() => setDraftDepartureTime(departureTime), [departureTime]);
+  const validDepartureTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(draftDepartureTime);
+  const commitDepartureTime = () => { if (validDepartureTime && draftDepartureTime !== departureTime) onDepartureTime(draftDepartureTime); };
   return <div className="space-y-4"><div className="flex items-end justify-between gap-3"><div><h4 className="font-display text-2xl font-black">交通方案</h4><p className="mt-1 text-xs font-bold text-ink/45">高德路线 · 千问推荐</p></div><button type="button" aria-label="重新查询交通方案" disabled={loading} onClick={onReload} className="grid h-9 w-9 place-items-center rounded-full bg-white text-river shadow-sm disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></button></div>
+    <section className="rounded-[1.55rem] border border-ink/8 bg-ink p-4 text-white shadow-[0_14px_32px_rgba(18,34,42,.14)]" aria-label="自定义首段出发时间"><div className="flex items-start gap-3"><span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-jade text-ink"><Clock3 className="h-5 w-5" /></span><div className="min-w-0 flex-1"><strong className="block font-display text-lg font-black">几点出发？</strong><p className="mt-1 text-[10px] font-bold leading-4 text-white/55">修改后重新查询路线耗时，并同步计算每段到达时间</p></div></div><div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] gap-2"><label className="flex min-w-0 items-center gap-2 rounded-2xl bg-white/10 px-3 py-2.5 focus-within:ring-2 focus-within:ring-jade"><span className="text-[10px] font-black text-white/55">首段</span><input aria-label="首段出发时间" type="time" step="300" value={draftDepartureTime} onChange={(event) => setDraftDepartureTime(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') commitDepartureTime(); }} className="min-w-0 flex-1 bg-transparent font-display text-xl font-black tabular-nums text-white [color-scheme:dark] focus:outline-none" /></label><button type="button" disabled={!validDepartureTime || draftDepartureTime === departureTime || loading} onClick={commitDepartureTime} className="rounded-2xl bg-jade px-4 text-[12px] font-black text-ink transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-35">{loading ? '计算中' : '重新计算'}</button></div><p aria-live="polite" className="mt-2 text-[9px] font-bold text-white/42">到达时间 = 该时刻 + 高德返回的实际路线耗时；AI只负责方案分析</p></section>
     <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="交通方式选择">{comparison?.options.map((option) => <TransportChoiceCard key={option.id} option={option} selected={option.id === selectedId} recommended={option.id === comparison.recommendedOptionId} onSelect={onSelect} />) ?? <TransportChoiceSkeleton />}</div>
     {comparison && <section className="rounded-[1.45rem] border border-river/10 bg-gradient-to-br from-river/[0.09] to-jade/[0.08] p-4"><div className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-1.5 text-[10px] font-black text-river"><Sparkles className="h-4 w-4" />{comparison.analysisSource === 'qwen-amap' ? `${getTransitStrategyLabel(strategy)} · 千问 AI 分析` : `${getTransitStrategyLabel(strategy)} · 智能规则分析`}</span><span className="rounded-full bg-white/80 px-2 py-1 text-[9px] font-black text-ink/45">推荐 {comparison.options.find((option) => option.id === comparison.recommendedOptionId)?.label}</span></div><p className="mt-2 text-[11px] font-bold leading-5 text-ink/65">{comparison.reason}</p>{comparison.optionAnalyses.length > 0 && <div className="mt-3 grid gap-2">{comparison.optionAnalyses.map((analysis) => <div key={analysis.id} className="flex gap-2 rounded-xl bg-white/65 px-3 py-2"><strong className="w-16 shrink-0 text-[9px] font-black text-river">{comparison.options.find((option) => option.id === analysis.id)?.label}</strong><span className="text-[9px] font-bold leading-4 text-ink/50">{analysis.summary}</span></div>)}</div>}</section>}
     {selectedId === 'transit' && <section className="rounded-[1.55rem] border border-river/10 bg-gradient-to-br from-white via-white to-river/[0.06] p-3.5 shadow-[0_12px_30px_rgba(18,34,42,.07)]"><div className="mb-3 flex items-center justify-between gap-3"><div><strong className="font-display text-base font-black">公共交通偏好</strong><p className="mt-0.5 text-[10px] font-bold text-ink/40">选择后同步更新路线与 AI 分析</p></div><span aria-live="polite" className="rounded-full bg-jade/10 px-2.5 py-1 text-[10px] font-black text-jade">{loading ? '正在重新规划…' : `当前 · ${getTransitStrategyLabel(strategy)}`}</span></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="公共交通路线偏好">{transitStrategies.map((item) => { const Icon = item.icon; const active = strategy === item.id; return <button key={item.id} type="button" role="radio" aria-checked={active} onClick={() => onStrategy(item.id)} className={`group relative flex min-h-12 items-center gap-2 overflow-hidden rounded-[1rem] border px-3 py-2.5 text-left text-[13px] font-black transition duration-200 ${active ? 'border-ink bg-ink text-white shadow-[0_9px_20px_rgba(18,34,42,.18)]' : 'border-ink/8 bg-white text-ink/65 shadow-sm hover:-translate-y-0.5 hover:border-river/25 hover:text-river hover:shadow-md'}`}><span className={`grid h-7 w-7 shrink-0 place-items-center rounded-xl transition ${active ? 'bg-jade text-ink' : 'bg-river/8 text-river group-hover:bg-river/12'}`}><Icon className="h-4 w-4" /></span><span className="whitespace-nowrap">{item.label}</span>{active && <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-jade" />}</button>; })}</div></section>}
@@ -607,46 +626,32 @@ function TransportChoiceCard({ option, selected, recommended, onSelect }: { opti
 function TransportChoiceSkeleton() { return <>{['公交 / 地铁', '驾车'].map((label) => <div key={label} className="animate-pulse rounded-[1.4rem] bg-white p-3 shadow-sm"><div className="h-9 w-9 rounded-2xl bg-ink/8" /><strong className="mt-3 block text-sm text-ink/35">{label}</strong><div className="mt-3 h-6 w-16 rounded bg-ink/8" /></div>)}</>; }
 
 function TransportSegmentCard({ segment, index, strategy, expanded, hasRealGeometry, onToggle }: { segment: TransportSegment; index: number; strategy: TransitStrategy; expanded: boolean; hasRealGeometry: boolean; onToggle: () => void }) {
-  const walkingLegs = segment.legs.filter((leg) => leg.mode === 'walk');
-  const routeLegs = segment.legs.filter((leg) => leg.mode !== 'walk');
-  const previewLegs = routeLegs.slice(0, 3);
-  const walkingPreview: TransportLeg | null = walkingLegs.length ? {
-    id: `${segment.id}-walking-summary`,
-    mode: 'walk',
-    viaStops: [],
-    durationMinutes: walkingLegs.reduce((total, leg) => total + leg.durationMinutes, 0),
-    distanceKm: walkingLegs.reduce((total, leg) => total + leg.distanceKm, 0),
-    instructions: walkingLegs.flatMap((leg) => leg.instructions ?? []),
-    roadNames: [...new Set(walkingLegs.flatMap((leg) => leg.roadNames ?? []))],
-    polyline: [],
-  } : null;
+  const compactRoute = getTransportSegmentCompactSummary(segment);
   const amapRouteUrl = getAmapRouteUrl(segment, strategy);
   return <article className={`relative overflow-hidden rounded-[1.6rem] border bg-white transition ${expanded ? 'border-tower shadow-[0_16px_38px_rgba(201,79,61,.16)] ring-4 ring-tower/10' : 'border-ink/8 shadow-sm hover:border-river/20 hover:shadow-md'}`}>
     <button type="button" aria-expanded={expanded} aria-label={getTransportSegmentAriaLabel(segment, index, expanded)} onClick={onToggle} className="block w-full p-4 text-left">
       <span className="flex items-start gap-3">
-        <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl transition ${expanded ? 'bg-tower text-white' : 'bg-river/10 text-river'}`}>{transportIcon(segment.mode)}</span>
+        <span className={`grid h-12 w-12 shrink-0 place-items-center rounded-[1.15rem] transition ${expanded ? 'bg-tower text-white shadow-lg shadow-tower/20' : 'bg-river/10 text-river'}`}>{transportIcon(segment.mode)}</span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center justify-between gap-2">
-            <span className={`text-[11px] font-black ${expanded ? 'text-tower' : 'text-river'}`}>第 {index + 1} 段 · {segment.mode}</span>
-            <span className="rounded-full bg-ink/5 px-2.5 py-1 text-[10px] font-black text-ink/45">约 {segment.durationMinutes} 分钟</span>
+            <span className={`text-[12px] font-black ${expanded ? 'text-tower' : 'text-river'}`}>第 {index + 1} 段 · {segment.mode}</span>
+            <span className="rounded-full bg-ink/5 px-2.5 py-1 text-[11px] font-black tabular-nums text-ink/50">{segment.durationMinutes} 分钟</span>
           </span>
-          <strong className="mt-2 block font-display text-base font-black"><span>{segment.from}</span><span className="mx-2 text-ink/25">→</span><span>{segment.to}</span></strong>
-          <span className={`mt-2 inline-flex rounded-full px-2 py-1 text-[9px] font-black ${segment.liveStatus ? 'bg-jade/10 text-jade' : 'bg-amber-100 text-amber-700'}`}>{segment.liveStatus ?? '线路待动态查询'}</span>
+          <strong className="mt-1.5 block font-display text-[17px] font-black leading-snug"><span>{segment.from}</span><span className="mx-2 text-ink/25">→</span><span>{segment.to}</span></strong>
         </span>
         <span className={`mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-full transition ${expanded ? 'rotate-180 bg-tower/10 text-tower' : 'bg-ink/5 text-ink/35'}`}><ChevronDown className="h-4 w-4" /></span>
       </span>
-      <span className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center rounded-2xl bg-ink/[0.035] px-3 py-2.5">
-        <span><small className="block text-[9px] font-black tracking-[0.12em] text-ink/35">出发</small><strong className="mt-0.5 block font-display text-lg font-black tabular-nums text-ink">{segment.departureTime}</strong></span>
-        <span className="mx-3 flex items-center gap-1 text-river"><span className="h-px w-7 bg-river/25" /><Navigation className="h-3.5 w-3.5" /><span className="h-px w-7 bg-river/25" /></span>
-        <span className="text-right"><small className="block text-[9px] font-black tracking-[0.12em] text-ink/35">到达</small><strong className="mt-0.5 block font-display text-lg font-black tabular-nums text-ink">{segment.arrivalTime}</strong></span>
+      <span className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center rounded-[1.15rem] bg-ink px-3.5 py-3 text-white">
+        <span><small className="block text-[9px] font-black tracking-[0.12em] text-white/40">出发</small><strong className="mt-0.5 block font-display text-xl font-black tabular-nums">{segment.departureTime}</strong></span>
+        <span className="mx-3 flex items-center gap-1 text-jade"><span className="h-px w-6 bg-jade/30" /><Navigation className="h-4 w-4" /><span className="h-px w-6 bg-jade/30" /></span>
+        <span className="text-right"><small className="block text-[9px] font-black tracking-[0.12em] text-white/40">到达</small><strong className="mt-0.5 block font-display text-xl font-black tabular-nums">{segment.arrivalTime}</strong></span>
       </span>
-      <span className="mt-3 block space-y-2">
-        {walkingPreview && <TransportLegPreview leg={walkingPreview} />}
-        {previewLegs.map((leg) => <TransportLegPreview key={leg.id} leg={leg} />)}
-        {!walkingPreview && !previewLegs.length && <span className="block rounded-xl border border-dashed border-ink/10 px-3 py-2.5 text-[11px] font-bold text-ink/45">详细线路待动态查询</span>}
-        {routeLegs.length > previewLegs.length && <span className="block pl-11 text-[10px] font-black text-river">展开查看其余 {routeLegs.length - previewLegs.length} 个换乘步骤</span>}
+      <span className="mt-3 flex items-center gap-3 rounded-[1.1rem] border border-ink/[0.065] bg-ink/[0.025] px-3 py-3">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-river/10 text-river">{transportIcon(segment.mode)}</span>
+        <span className="min-w-0 flex-1"><small className="block text-[9px] font-black tracking-[0.08em] text-ink/35">路线摘要</small><strong className="mt-0.5 block truncate text-[13px] font-black text-ink">{compactRoute.items.join(' → ') || '详细线路待动态查询'}</strong></span>
+        {compactRoute.hiddenCount > 0 && <span className="shrink-0 rounded-full bg-river px-2.5 py-1 text-[10px] font-black text-white">+{compactRoute.hiddenCount}</span>}
       </span>
-      <span className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-river/8 px-2.5 py-1 text-[10px] font-black text-river">全程 {formatTransportDistance(segment.distanceKm)}</span><span className="rounded-full bg-jade/10 px-2.5 py-1 text-[10px] font-black text-jade">费用 {segment.costEstimate}</span></span>
+      <span className="mt-3 flex items-center gap-2 text-[10px] font-black"><span className="rounded-full bg-river/8 px-2.5 py-1 text-river">{formatTransportDistance(segment.distanceKm)}</span><span className="rounded-full bg-jade/10 px-2.5 py-1 text-jade">{segment.costEstimate}</span><span className={`ml-auto truncate ${segment.liveStatus ? 'text-jade' : 'text-amber-700'}`}>{segment.liveStatus ?? '线路待动态查询'}</span></span>
     </button>
     {amapRouteUrl && <div className="border-t border-ink/8 bg-white px-4 py-3"><a href={amapRouteUrl} target="_blank" rel="noreferrer" className="flex w-full items-center justify-between gap-3 rounded-xl bg-river/[0.07] px-3 py-2.5 text-[11px] font-black text-river transition hover:bg-river hover:text-white"><span className="inline-flex items-center gap-2"><Navigation className="h-4 w-4" />高德查看完整路线</span><span className="inline-flex items-center gap-1 text-[9px]">已填入起点与终点<ExternalLink className="h-3 w-3" /></span></a></div>}
     {expanded && <TransportExpandedDetails segment={segment} hasRealGeometry={hasRealGeometry} />}
@@ -715,15 +720,23 @@ function TransportMetric({ label, value, unit, sub }: { label: string; value: st
   return <div className="min-w-0 px-2 sm:px-3"><span className="block text-[8px] font-black tracking-[0.12em] text-ink/35">{label}</span><strong className="mt-1 block truncate font-display text-lg font-black tabular-nums text-ink sm:text-xl">{value}{unit && <small className="ml-0.5 text-[9px]">{unit}</small>}</strong>{sub && <small className="mt-0.5 block truncate text-[8px] font-bold text-ink/38">{sub}</small>}</div>;
 }
 
-function TransportLegPreview({ leg }: { leg: TransportLeg }) {
-  const summary = getTransportLegPreview(leg);
-  return <span className="flex items-center gap-2.5 rounded-xl border border-ink/[0.055] bg-white px-3 py-2.5 shadow-[0_4px_12px_rgba(18,34,42,.04)]"><span className={`grid h-7 w-7 shrink-0 place-items-center rounded-xl ${leg.mode === 'subway' ? 'bg-tower text-white' : leg.mode === 'bus' ? 'bg-river text-white' : 'bg-ink/5 text-ink/50'}`}>{legIcon(leg.mode)}</span><span className="min-w-0 flex-1"><strong className="block truncate text-[12px] font-black text-ink">{summary.headline}</strong><small className="mt-0.5 block truncate text-[10px] font-bold text-ink/45">{summary.detail}</small></span>{summary.meta && <span className="shrink-0 text-[9px] font-black text-river">{summary.meta}</span>}</span>;
-}
-
 export function formatTransportDistance(distanceKm: number) {
   if (!Number.isFinite(distanceKm) || distanceKm <= 0) return '待查询';
   if (distanceKm < 1) return `${Math.max(1, Math.round(distanceKm * 1000))} 米`;
   return `${Math.round(distanceKm * 10) / 10} 公里`;
+}
+
+export function getTransportSegmentCompactSummary(segment: TransportSegment) {
+  const walkingDistanceKm = segment.legs.filter((leg) => leg.mode === 'walk').reduce((total, leg) => total + leg.distanceKm, 0);
+  const transitItems = segment.legs.filter((leg) => leg.mode !== 'walk').map((leg) => {
+    if (leg.lineName) return leg.lineName;
+    if (leg.mode === 'taxi' && leg.roadNames?.length) return `经 ${leg.roadNames.slice(0, 2).join('、')}`;
+    return leg.mode === 'subway' ? '地铁线路待查询' : leg.mode === 'bus' ? '公交线路待查询' : leg.mode === 'railway' ? '铁路班次待查询' : leg.mode === 'taxi' ? '驾车路线' : '接驳路线';
+  });
+  const uniqueTransitItems = transitItems.filter((item, itemIndex) => transitItems.indexOf(item) === itemIndex);
+  const allItems = [...(walkingDistanceKm > 0 ? [`步行 ${formatTransportDistance(walkingDistanceKm)}`] : []), ...uniqueTransitItems];
+  const visibleLimit = 2;
+  return { items: allItems.slice(0, visibleLimit), hiddenCount: Math.max(0, allItems.length - visibleLimit), walkingDistanceKm };
 }
 
 export function getTransportLegPreview(leg: TransportLeg) {
