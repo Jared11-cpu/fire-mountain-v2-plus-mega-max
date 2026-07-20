@@ -93,7 +93,7 @@ export class HttpTransportPlanProvider implements TransportPlanProvider {
   readonly id = 'transport-api';
   constructor(private readonly endpoint: string, private readonly fetcher: typeof fetch = fetch) {}
   async plan(request: TransportPlanRequest, signal?: AbortSignal) {
-    const response = await this.fetcher(this.endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), signal });
+    const response = await this.fetcher.call(globalThis, this.endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), signal });
     if (!response.ok) throw new Error(`交通 API HTTP ${response.status}`);
     const data = await response.json() as TransportPlanResponse;
     if (!Array.isArray(data.segments) || typeof data.summary !== 'string') throw new Error('交通 API 返回格式不正确');

@@ -32,6 +32,20 @@ describe('transportService', () => {
     expect(result.segments[0].liveStatus).toBe('道路畅通');
   });
 
+  it('uses the browser global as this when calling the native fetch function', async () => {
+    const apiResult: TransportPlanResponse = { source: 'transport-api', sourceLabel: '高德动态公交规划', generatedAt: new Date().toISOString(), isRealtime: false, freshness: 'live-query', totalMinutes: 20, totalDistanceKm: 8, summary: '动态路线可用', segments: [], notices: [] };
+    const fetcher = vi.fn(function (this: unknown) {
+      if (this !== globalThis) throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+      return Promise.resolve(new Response(JSON.stringify(apiResult), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }) as unknown as typeof fetch;
+
+    const result = await resolveTransportPlan(requestFixture(), { endpoint: 'https://example.test/transport', fetcher });
+
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(result.sourceLabel).toBe('高德动态公交规划');
+    expect(result.freshness).toBe('live-query');
+  });
+
   it('交通 API 失败时明确降级为规则方案', async () => {
     const fetcher = vi.fn(async () => new Response('error', { status: 503 })) as unknown as typeof fetch;
     const result = await resolveTransportPlan(requestFixture(), { endpoint: 'https://example.test/transport', fetcher });
