@@ -175,6 +175,10 @@ describe('AMap-style transport segment summaries', () => {
     expect(getTransportLegPreview({ id: 'estimate', mode: 'bus', viaStops: [], durationMinutes: 12, distanceKm: 2.8, polyline: [] })).toEqual({ headline: '公交线路待动态查询', detail: '上下车站待动态查询', meta: '12 分钟' });
   });
 
+  it('shows named roads and turn guidance for a driving leg', () => {
+    expect(getTransportLegPreview({ id: 'drive', mode: 'taxi', lineName: '驾车路线', viaStops: [], durationMinutes: 18, distanceKm: 9.4, fare: 28, roadNames: ['东山大道', '桔城路'], instructions: ['沿东山大道向西行驶'], polyline: [] })).toEqual({ headline: '经 东山大道 → 桔城路', detail: '沿东山大道向西行驶', meta: '约 ¥28' });
+  });
+
   it('includes time, route, and fare in the accessible card label', () => {
     const segment: TransportSegment = { id: 'segment', from: '武汉站', to: '武汉东湖', departureTime: '08:55', arrivalTime: '09:22', durationMinutes: 27, distanceKm: 10, mode: '地铁', costEstimate: '¥4', instruction: '', legs: [{ id: 'line', mode: 'subway', lineName: '地铁2号线', viaStops: [], durationMinutes: 18, distanceKm: 9.6, polyline: [] }] };
     expect(getTransportSegmentAriaLabel(segment, 0, false)).toContain('08:55 出发，09:22 到达；地铁2号线；费用 ¥4');

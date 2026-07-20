@@ -1,6 +1,6 @@
 import type { PlannedRoutePoint, TripRequest } from '../domain/trip';
 
-export type TransportMode = '步行' | '公交' | '地铁' | '驾车' | '网约车' | '景区专线' | '公共交通';
+export type TransportMode = '步行' | '公交' | '地铁' | '铁路' | '驾车' | '网约车' | '景区专线' | '公共交通';
 export type TransportSource = 'transport-api' | 'rules-v1' | 'rules-fallback';
 export type TransportFreshness = 'vehicle-realtime' | 'live-query' | 'estimate';
 export type TransitStrategy = 'recommended' | 'fastest' | 'economy' | 'fewest-transfers' | 'least-walking' | 'subway-first';
@@ -21,6 +21,8 @@ export type TransportLeg = {
   fare?: number;
   serviceStartTime?: string;
   serviceEndTime?: string;
+  instructions?: string[];
+  roadNames?: string[];
   polyline: Array<[number, number]>;
 };
 
@@ -133,8 +135,9 @@ type AmapDrivingPath = {
   durationMinutes: number;
   distanceKm: number;
   tolls?: number;
+  taxiCost?: number;
   polyline?: Array<[number, number]>;
-  steps?: Array<{ instruction?: string }>;
+  steps?: Array<{ instruction?: string; road?: string; distanceMeters?: number; durationMinutes?: number }>;
 };
 
 type AmapDrivingResponse = {
@@ -201,15 +204,17 @@ export async function resolveDrivingTransportPlan(request: TransportPlanRequest,
     }));
     const segments = pathResults.map(({ point, next, path }): TransportSegment => {
       const departureTime = shiftClock(point.arrivalTime, point.durationMinutes);
-      const tollCopy = path.tolls === undefined ? '费用以导航为准' : path.tolls > 0 ? `过路费 ¥${path.tolls}` : '无过路费';
+      const costParts = [path.taxiCost === undefined ? '' : `打车约 ¥${path.taxiCost}`, path.tolls === undefined ? '' : path.tolls > 0 ? `过路费 ¥${path.tolls}` : '无过路费'].filter(Boolean);
+      const instructions = path.steps?.map((step) => step.instruction).filter((value): value is string => Boolean(value)) ?? [];
+      const roadNames = [...new Set(path.steps?.map((step) => step.road).filter((value): value is string => Boolean(value)) ?? [])];
       return {
         id: `${point.id}-${next.id}-driving`, from: point.name, to: next.name, departureTime,
         arrivalTime: shiftClock(departureTime, path.durationMinutes), durationMinutes: path.durationMinutes,
-        distanceKm: path.distanceKm, mode: '驾车', costEstimate: tollCopy,
-        ...(path.tolls === undefined ? {} : { fare: path.tolls }),
-        instruction: path.steps?.map((step) => step.instruction).filter(Boolean).slice(0, 3).join('；') || '按高德本次道路规划行驶，出发前再次刷新路况。',
+        distanceKm: path.distanceKm, mode: '驾车', costEstimate: costParts.join(' · ') || '费用待查询',
+        ...(path.taxiCost === undefined ? {} : { fare: path.taxiCost }),
+        instruction: instructions.slice(0, 3).join('；') || '按高德本次道路规划行驶，出发前再次刷新路况。',
         liveStatus: '高德动态道路规划',
-        legs: [{ id: `${point.id}-${next.id}-drive`, mode: 'taxi', lineName: '驾车路线', viaStops: [], durationMinutes: path.durationMinutes, distanceKm: path.distanceKm, polyline: path.polyline?.length ? path.polyline : [] }],
+        legs: [{ id: `${point.id}-${next.id}-drive`, mode: 'taxi', lineName: '驾车路线', viaStops: [], durationMinutes: path.durationMinutes, distanceKm: path.distanceKm, ...(path.taxiCost === undefined ? {} : { fare: path.taxiCost }), instructions, roadNames, polyline: path.polyline?.length ? path.polyline : [] }],
       };
     });
     const totalFare = segments.reduce((sum, segment) => sum + (segment.fare ?? 0), 0);
@@ -270,7 +275,7 @@ export function buildRulesTransportPlan(request: TransportPlanRequest): Transpor
       durationMinutes,
       distanceKm: Math.round(distanceKm * 10) / 10,
       mode,
-      costEstimate: costRange(mode, distanceKm),
+      costEstimate: mode === '步行' ? '¥0' : '待查询',
       instruction: instructionFor(mode, durationMinutes, request.travelerType),
       legs: [{ id: `${point.id}-${next.id}-estimate`, mode: legMode, viaStops: [], durationMinutes, distanceKm: Math.round(distanceKm * 10) / 10, polyline: [] }],
     };
@@ -278,7 +283,7 @@ export function buildRulesTransportPlan(request: TransportPlanRequest): Transpor
   const totalMinutes = segments.reduce((sum, segment) => sum + segment.durationMinutes, 0);
   const totalDistanceKm = Math.round(segments.reduce((sum, segment) => sum + segment.distanceKm, 0) * 10) / 10;
   const longSegments = segments.filter((segment) => segment.durationMinutes >= 60).length;
-  const notices = ['当前未配置可用的动态公交代理，线路、时间与费用为规则估算，不能替代导航。', '在 Sites 中配置 AMAP_WEB_SERVICE_KEY，并让前端指向 /api/transit/plan 后即可返回公交与地铁线路。'];
+  const notices = ['当前未取得可用的高德公交结果，线路、时间与费用只能标记为待查询，不能替代导航。', '请确认 Sites 已配置 AMAP_WEB_SERVICE_KEY，且高德 Web 服务 Key 已启用路径规划服务。'];
   if (request.specialNeeds.includes('行动不便')) notices.unshift('已优先减少步行；上下车点仍需核验无障碍设施。');
   return { source: 'rules-v1', sourceLabel: '规则引擎交通方案', generatedAt: new Date().toISOString(), isRealtime: false, freshness: 'estimate', totalMinutes, totalDistanceKm, summary: `共 ${segments.length} 段交通，预计 ${totalMinutes} 分钟、约 ${totalDistanceKm} 公里${longSegments ? `；其中 ${longSegments} 段为跨区长距离交通` : ''}。`, segments, notices };
 }
@@ -320,18 +325,16 @@ function round1(value: number) { return Math.round(value * 10) / 10; }
 export function transportModeForLegs(legs: TransportLeg[]): TransportMode {
   if (legs.some((leg) => leg.mode === 'subway')) return '地铁';
   if (legs.some((leg) => leg.mode === 'bus')) return '公交';
-  if (legs.some((leg) => leg.mode === 'railway' || leg.mode === 'shuttle')) return '景区专线';
+  if (legs.some((leg) => leg.mode === 'railway')) return '铁路';
+  if (legs.some((leg) => leg.mode === 'shuttle')) return '景区专线';
   if (legs.some((leg) => leg.mode === 'taxi')) return '网约车';
   return '步行';
 }
 
 function chooseMode(distanceKm: number, minutes: number, specialNeeds: TripRequest['specialNeeds']): TransportMode {
-  if (minutes >= 60 || distanceKm >= 25) return '景区专线';
   if (distanceKm <= 1.8 && !specialNeeds.includes('行动不便')) return '步行';
-  if (distanceKm <= 8) return '公共交通';
-  return '网约车';
+  return '公共交通';
 }
-function costRange(mode: TransportMode, distanceKm: number) { if (mode === '步行') return '¥0'; if (mode === '公共交通' || mode === '公交' || mode === '地铁') return '¥2–8'; if (mode === '景区专线') return '¥20–80/人'; const low = Math.max(12, Math.round(distanceKm * 2)); return `¥${low}–${low + 15}`; }
-function instructionFor(mode: TransportMode, minutes: number, travelerType: TripRequest['travelerType']) { if (mode === '步行') return '沿主路步行，过路口时以实际信号灯为准。'; if (mode === '公共交通' || mode === '公交' || mode === '地铁') return '当前为规则估算，接入动态公交代理后显示具体线路、站点与换乘。'; if (mode === '景区专线') return '建议提前预约景区直通车或正规包车，并为山路预留机动时间。'; return travelerType === '老人' || travelerType === '家庭' ? '建议预约可放行李车辆，上车前确认落客点与步行距离。' : `建议提前 10 分钟叫车，为拥堵预留约 ${Math.max(10, Math.round(minutes * 0.2))} 分钟。`; }
+function instructionFor(mode: TransportMode, _minutes: number, _travelerType: TripRequest['travelerType']) { if (mode === '步行') return '步行时间为距离估算；具体道路与路口须等待高德动态查询。'; return '动态查询未返回可核验线路，因此不显示虚构的线路号、站名或票价；请刷新查询或前往高德地图复核。'; }
 function shiftClock(value: string, delta: number) { const [hour, minute] = value.split(':').map(Number); const total = (((hour || 0) * 60 + (minute || 0) + delta) % 1440 + 1440) % 1440; return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`; }
 function haversine(lat1: number, lng1: number, lat2: number, lng2: number) { const radius = 6371; const radians = (value: number) => value * Math.PI / 180; const dLat = radians(lat2 - lat1); const dLng = radians(lng2 - lng1); const a = Math.sin(dLat / 2) ** 2 + Math.cos(radians(lat1)) * Math.cos(radians(lat2)) * Math.sin(dLng / 2) ** 2; return radius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); }

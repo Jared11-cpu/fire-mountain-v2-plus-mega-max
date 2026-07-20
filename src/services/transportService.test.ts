@@ -15,9 +15,11 @@ describe('transportService', () => {
     expect(result.isRealtime).toBe(false);
     expect(result.segments).toHaveLength(5);
     expect(result.segments.every((segment) => segment.arrivalTime > segment.departureTime)).toBe(true);
-    expect(result.notices[0]).toContain('未配置可用的动态公交代理');
+    expect(result.notices[0]).toContain('未取得可用的高德公交结果');
     expect(result.segments.every((segment) => segment.legs.length === 1)).toBe(true);
     expect(result.segments.every((segment) => segment.legs.every((leg) => leg.polyline.length === 0))).toBe(true);
+    expect(result.segments.every((segment) => segment.mode !== '景区专线')).toBe(true);
+    expect(result.segments.filter((segment) => segment.mode !== '步行').every((segment) => segment.costEstimate === '待查询')).toBe(true);
   });
 
   it('配置后端地址时使用交通 API 响应', async () => {
@@ -39,12 +41,14 @@ describe('transportService', () => {
   });
 
   it('按每段路线组合高德驾车方案', async () => {
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({ paths: [{ durationMinutes: 18, distanceKm: 9.4, tolls: 0, polyline: [[111.1, 30.1], [111.2, 30.2]], steps: [{ instruction: '沿主路行驶' }] }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch;
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ paths: [{ durationMinutes: 18, distanceKm: 9.4, tolls: 0, taxiCost: 28, polyline: [[111.1, 30.1], [111.2, 30.2]], steps: [{ instruction: '沿东山大道向西行驶', road: '东山大道' }] }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch;
     const result = await resolveDrivingTransportPlan(requestFixture(), { endpoint: 'https://example.test/route', fetcher });
     expect(result.sourceLabel).toBe('高德动态驾车规划');
     expect(result.segments).toHaveLength(5);
     expect(result.segments.every((segment) => segment.mode === '驾车')).toBe(true);
-    expect(result.segments[0].instruction).toContain('沿主路行驶');
+    expect(result.segments[0].instruction).toContain('沿东山大道');
+    expect(result.segments[0].costEstimate).toBe('打车约 ¥28 · 无过路费');
+    expect(result.segments[0].legs[0].roadNames).toEqual(['东山大道']);
   });
 
   it('对比高德公交和驾车事实并采用千问推荐', async () => {

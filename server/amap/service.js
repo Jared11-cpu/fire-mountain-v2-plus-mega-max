@@ -79,10 +79,11 @@ export async function planRoute(env, input) {
   }
   const origin = await routeCoordinate(key, input.origin, 'origin');
   const destination = await routeCoordinate(key, input.destination, 'destination');
-  const params = new URLSearchParams({ key, origin, destination, show_fields: 'cost,polyline' });
+  const params = new URLSearchParams({ key, origin, destination, show_fields: 'cost,polyline,navi' });
   if (mode === 'driving') params.set('strategy', String(input.strategy ?? 0));
   const data = await amapJson(`/v5/direction/${mode}?${params}`, `高德${mode}路线规划`);
-  const paths = (data.route?.paths || data.paths || []).map(normalizePath);
+  const taxiCost = money(data.route?.taxi_cost);
+  const paths = (data.route?.paths || data.paths || []).map((path) => ({ ...normalizePath(path), ...(taxiCost === undefined ? {} : { taxiCost }) }));
   if (!paths.length) throw httpError(502, '高德没有返回可用路线');
   return { source: 'amap', freshness: 'live-query', mode, generatedAt: new Date().toISOString(), origin, destination, paths };
 }
@@ -144,7 +145,7 @@ export async function realtimeTransitQuery(env, query) {
 
 async function transitSegment(key, request, from, to, index) {
   const cityCode = request.cityCode || CITY_CODES[request.city] || request.city;
-  const params = new URLSearchParams({ key, origin: requiredCoordinate(from, 'from'), destination: requiredCoordinate(to, 'to'), city1: cityCode, city2: cityCode, strategy: String(TRANSIT_STRATEGIES[request.strategy] ?? 0), AlternativeRoute: '1', show_fields: 'cost,polyline', date: request.departureDate, time: request.departureTime.replace(':', '-') });
+  const params = new URLSearchParams({ key, origin: requiredCoordinate(from, 'from'), destination: requiredCoordinate(to, 'to'), city1: cityCode, city2: cityCode, strategy: String(TRANSIT_STRATEGIES[request.strategy] ?? 0), AlternativeRoute: '1', show_fields: 'cost,polyline,navi', date: request.departureDate, time: request.departureTime.replace(':', '-') });
   const data = await amapJson(`/v5/direction/transit/integrated?${params}`, '高德公交服务');
   const transit = data.route?.transits?.[0];
   if (!transit) return drivingFallback(key, from, to, index);
@@ -162,7 +163,7 @@ export function parseTransitLegs(transit, segmentId) {
   const legs = [];
   for (const [segmentIndex, segment] of (transit.segments ?? []).entries()) {
     const walkingSteps = segment.walking?.steps ?? [];
-    if (walkingSteps.length) legs.push({ id: `${segmentId}-${segmentIndex}-walk`, mode: 'walk', viaStops: [], durationMinutes: secondsToMinutes(segment.walking?.cost?.duration ?? segment.walking?.duration ?? walkingSteps.reduce((sum, step) => sum + Number(step.cost?.duration ?? step.duration ?? 0), 0)), distanceKm: round1(Number(segment.walking?.distance ?? walkingSteps.reduce((sum, step) => sum + Number(step.step_distance ?? step.distance ?? 0), 0)) / 1000), polyline: walkingSteps.flatMap((step) => parsePolyline(step.polyline)) });
+    if (walkingSteps.length) legs.push({ id: `${segmentId}-${segmentIndex}-walk`, mode: 'walk', viaStops: [], durationMinutes: secondsToMinutes(segment.walking?.cost?.duration ?? segment.walking?.duration ?? walkingSteps.reduce((sum, step) => sum + Number(step.cost?.duration ?? step.duration ?? 0), 0)), distanceKm: round1(Number(segment.walking?.distance ?? walkingSteps.reduce((sum, step) => sum + Number(step.step_distance ?? step.distance ?? 0), 0)) / 1000), instructions: walkingSteps.map((step) => step.instruction).filter(Boolean), roadNames: [...new Set(walkingSteps.map((step) => step.road_name || step.road).filter(Boolean))], polyline: walkingSteps.flatMap((step) => parsePolyline(step.polyline)) });
     for (const [lineIndex, line] of (segment.bus?.buslines ?? segment.bus?.steps ?? []).entries()) {
       const lineName = cleanLineName(line.name ?? line.bus_name ?? '公共交通');
       const subway = /地铁|轨道交通|轻轨/.test(`${line.type ?? ''}${lineName}`);
@@ -174,13 +175,15 @@ export function parseTransitLegs(transit, segmentId) {
 }
 
 async function drivingFallback(key, from, to, index) {
-  const params = new URLSearchParams({ key, origin: requiredCoordinate(from, 'from'), destination: requiredCoordinate(to, 'to'), strategy: '0', show_fields: 'cost,polyline' });
+  const params = new URLSearchParams({ key, origin: requiredCoordinate(from, 'from'), destination: requiredCoordinate(to, 'to'), strategy: '0', show_fields: 'cost,polyline,navi' });
   const data = await amapJson(`/v5/direction/driving?${params}`, '高德驾车服务');
   const path = data.route?.paths?.[0];
   if (!path) throw httpError(502, `第 ${index + 1} 段没有可用公交或道路方案`);
   const normalized = normalizePath(path); const departureTime = shiftClock(from.arrivalTime, from.durationMinutes);
-  const low = Math.max(12, Math.round(normalized.distanceKm * 2));
-  return { id: `${from.id}-${to.id}`, from: from.name, to: to.name, departureTime, arrivalTime: shiftClock(departureTime, normalized.durationMinutes), durationMinutes: normalized.durationMinutes, distanceKm: normalized.distanceKm, mode: '网约车', costEstimate: `约 ¥${low}–${low + 15}`, instruction: '该段未查询到合适公共交通，已降级为高德真实驾车道路方案。', liveStatus: '动态路线查询', legs: [{ id: `${from.id}-${to.id}-drive`, mode: 'taxi', viaStops: [], durationMinutes: normalized.durationMinutes, distanceKm: normalized.distanceKm, polyline: normalized.polyline }] };
+  const taxiCost = money(data.route?.taxi_cost);
+  const instructions = normalized.steps.map((step) => step.instruction).filter(Boolean);
+  const roadNames = [...new Set(normalized.steps.map((step) => step.road).filter(Boolean))];
+  return { id: `${from.id}-${to.id}`, from: from.name, to: to.name, departureTime, arrivalTime: shiftClock(departureTime, normalized.durationMinutes), durationMinutes: normalized.durationMinutes, distanceKm: normalized.distanceKm, mode: '网约车', costEstimate: taxiCost === undefined ? '费用待查询' : `打车约 ¥${taxiCost}`, ...(taxiCost === undefined ? {} : { fare: taxiCost }), instruction: instructions.slice(0, 3).join('；') || '该段未查询到合适公共交通，已降级为高德真实驾车道路方案。', liveStatus: '高德动态道路规划', legs: [{ id: `${from.id}-${to.id}-drive`, mode: 'taxi', lineName: '驾车接驳', viaStops: [], durationMinutes: normalized.durationMinutes, distanceKm: normalized.distanceKm, ...(taxiCost === undefined ? {} : { fare: taxiCost }), instructions, roadNames, polyline: normalized.polyline }] };
 }
 
 async function amapJson(path, service) {
@@ -218,7 +221,7 @@ function secondsToMinutes(value) { const seconds = Number(value ?? 0); return se
 function money(value) { const number = Number(value); return Number.isFinite(number) && number >= 0 ? round1(number) : undefined; }
 function numberOrNull(value) { const number = Number(value); return Number.isFinite(number) ? number : null; }
 function findTransitFare(transit) { for (const segment of transit.segments ?? []) { const value = money(segment.cost?.transit_fee); if (value !== undefined) return value; } return undefined; }
-function modeForLegs(legs) { if (legs.some((leg) => leg.mode === 'subway')) return '地铁'; if (legs.some((leg) => leg.mode === 'bus')) return '公交'; if (legs.some((leg) => leg.mode === 'railway' || leg.mode === 'shuttle')) return '景区专线'; if (legs.some((leg) => leg.mode === 'taxi')) return '网约车'; return '步行'; }
+function modeForLegs(legs) { if (legs.some((leg) => leg.mode === 'subway')) return '地铁'; if (legs.some((leg) => leg.mode === 'bus')) return '公交'; if (legs.some((leg) => leg.mode === 'railway')) return '铁路'; if (legs.some((leg) => leg.mode === 'shuttle')) return '景区专线'; if (legs.some((leg) => leg.mode === 'taxi')) return '网约车'; return '步行'; }
 function cleanLineName(value) { return String(value).replace(/\([^)]*--[^)]*\)/g, '').trim(); }
 function formatServiceTime(value) { const text = String(value ?? '').replace(':', ''); return /^\d{4}$/.test(text) ? `${text.slice(0, 2)}:${text.slice(2)}` : undefined; }
 function shiftClock(value, delta) { const [hour, minute] = String(value || '08:30').split(':').map(Number); const total = (((hour || 0) * 60 + (minute || 0) + Number(delta || 0)) % 1440 + 1440) % 1440; return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`; }
