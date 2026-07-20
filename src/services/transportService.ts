@@ -39,6 +39,8 @@ export type TransportSegment = {
   fare?: number;
   instruction: string;
   liveStatus?: string;
+  origin?: { lng: number; lat: number };
+  destination?: { lng: number; lat: number };
   legs: TransportLeg[];
 };
 
@@ -80,6 +82,7 @@ export type TransportComparison = {
   recommendedOptionId: TransportChoiceId;
   reason: string;
   cautions: string[];
+  optionAnalyses: Array<{ id: TransportChoiceId; summary: string }>;
   analysisSource: 'qwen-amap' | 'rules';
   generatedAt: string;
 };
@@ -164,18 +167,25 @@ export async function resolveTransportComparison(request: TransportPlanRequest, 
     const response = await fetcher(adviceEndpoint, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: options.signal,
       body: JSON.stringify({
-        options: choices.map(({ id, label, plan }) => ({ id, label, totalMinutes: plan.totalMinutes, totalDistanceKm: plan.totalDistanceKm, totalFare: plan.totalFare, freshness: plan.freshness, segments: plan.segments.length })),
+        options: choices.map(({ id, label, plan }) => ({
+          id, label, totalMinutes: plan.totalMinutes, totalDistanceKm: plan.totalDistanceKm, totalFare: plan.totalFare, freshness: plan.freshness,
+          routeModes: [...new Set(plan.segments.map((segment) => segment.mode))],
+          walkingMinutes: plan.segments.flatMap((segment) => segment.legs).filter((leg) => leg.mode === 'walk').reduce((sum, leg) => sum + leg.durationMinutes, 0),
+          transferCount: Math.max(0, plan.segments.flatMap((segment) => segment.legs).filter((leg) => leg.mode !== 'walk').length - plan.segments.length),
+          segments: plan.segments.map((segment) => ({ mode: segment.mode, durationMinutes: segment.durationMinutes, distanceKm: segment.distanceKm, costEstimate: segment.costEstimate, lines: segment.legs.map((leg) => leg.lineName).filter(Boolean) })),
+        })),
         userPreference: strategyLabel(request.strategy), specialNeeds: request.specialNeeds,
       }),
     });
     if (!response.ok) throw new Error(`AI 交通分析 HTTP ${response.status}`);
-    const result = await response.json() as { recommendedOptionId?: string; reason?: string; cautions?: string[] };
+    const result = await response.json() as { recommendedOptionId?: string; reason?: string; cautions?: string[]; optionAnalyses?: Array<{ id?: string; summary?: string }> };
     if (!choices.some((choice) => choice.id === result.recommendedOptionId) || !result.reason) throw new Error('AI 交通分析格式不正确');
     return {
       options: choices,
       recommendedOptionId: result.recommendedOptionId as TransportChoiceId,
       reason: result.reason,
       cautions: Array.isArray(result.cautions) ? result.cautions.slice(0, 2) : [],
+      optionAnalyses: Array.isArray(result.optionAnalyses) ? result.optionAnalyses.filter((item): item is { id: TransportChoiceId; summary: string } => choices.some((choice) => choice.id === item.id) && Boolean(item.summary)).slice(0, choices.length) : fallback.optionAnalyses,
       analysisSource: 'qwen-amap',
       generatedAt: new Date().toISOString(),
     };
@@ -211,6 +221,7 @@ export async function resolveDrivingTransportPlan(request: TransportPlanRequest,
         id: `${point.id}-${next.id}-driving`, from: point.name, to: next.name, departureTime,
         arrivalTime: shiftClock(departureTime, path.durationMinutes), durationMinutes: path.durationMinutes,
         distanceKm: path.distanceKm, mode: '驾车', costEstimate: costParts.join(' · ') || '费用待查询',
+        origin: { lng: point.lng, lat: point.lat }, destination: { lng: next.lng, lat: next.lat },
         ...(path.taxiCost === undefined ? {} : { fare: path.taxiCost }),
         instruction: instructions.slice(0, 3).join('；') || '按高德本次道路规划行驶，出发前再次刷新路况。',
         liveStatus: '高德动态道路规划',
@@ -275,6 +286,7 @@ export function buildRulesTransportPlan(request: TransportPlanRequest): Transpor
       durationMinutes,
       distanceKm: Math.round(distanceKm * 10) / 10,
       mode,
+      origin: { lng: point.lng, lat: point.lat }, destination: { lng: next.lng, lat: next.lat },
       costEstimate: mode === '步行' ? '¥0' : '待查询',
       instruction: instructionFor(mode, durationMinutes, request.travelerType),
       legs: [{ id: `${point.id}-${next.id}-estimate`, mode: legMode, viaStops: [], durationMinutes, distanceKm: Math.round(distanceKm * 10) / 10, polyline: [] }],
@@ -298,6 +310,7 @@ export function buildRulesDrivingPlan(request: TransportPlanRequest): TransportP
     return {
       id: `${point.id}-${next.id}-drive-estimate`, from: point.name, to: next.name, departureTime,
       arrivalTime: shiftClock(departureTime, durationMinutes), durationMinutes, distanceKm, mode: '驾车',
+      origin: { lng: point.lng, lat: point.lat }, destination: { lng: next.lng, lat: next.lat },
       costEstimate: '油费与过路费待导航', instruction: '当前为规则估算，恢复高德服务后将显示真实道路、用时与过路费。',
       legs: [{ id: `${point.id}-${next.id}-drive-estimate-leg`, mode: 'taxi', lineName: '驾车估算', viaStops: [], durationMinutes, distanceKm, polyline: [] }],
     };
@@ -316,7 +329,8 @@ function fallbackTransportAdvice(choices: TransportChoice[], request: TransportP
   const recommendedOptionId: TransportChoiceId = preferTransit && reliableTransit ? 'transit' : reliableDriving && (!reliableTransit || driving.plan.totalMinutes < transit.plan.totalMinutes * 0.78) ? 'driving' : 'transit';
   const selected = recommendedOptionId === 'driving' ? driving : transit;
   const reason = `${selected.label}预计 ${selected.plan.totalMinutes} 分钟、约 ${selected.plan.totalDistanceKm} 公里，较符合当前“${strategyLabel(request.strategy)}”偏好。`;
-  return { recommendedOptionId, reason, cautions: ['千问分析暂不可用，当前推荐按高德返回值与偏好规则生成。'], analysisSource: 'rules' };
+  const optionAnalyses = choices.map((choice) => ({ id: choice.id, summary: choice.plan.freshness === 'estimate' ? `${choice.label}当前缺少可核验线路，需先恢复高德查询。` : `${choice.label}约 ${choice.plan.totalMinutes} 分钟、${choice.plan.totalDistanceKm} 公里${choice.plan.totalFare === undefined ? '，费用待查询' : `，约 ¥${choice.plan.totalFare}`}。` }));
+  return { recommendedOptionId, reason, cautions: ['千问分析暂不可用，当前推荐按高德返回值与偏好规则生成。'], optionAnalyses, analysisSource: 'rules' };
 }
 
 function strategyLabel(value: TransitStrategy) { return ({ recommended: '综合推荐', fastest: '时间短', economy: '最省钱', 'fewest-transfers': '少换乘', 'least-walking': '少步行', 'subway-first': '地铁优先' } as const)[value]; }

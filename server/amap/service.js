@@ -156,7 +156,7 @@ async function transitSegment(key, request, from, to, index) {
   const fare = money(transit.cost?.transit_fee ?? transit.cost?.fee ?? findTransitFare(transit));
   const mode = modeForLegs(legs);
   const departureTime = shiftClock(from.arrivalTime || request.departureTime, from.durationMinutes || 0);
-  return { id: `${from.id}-${to.id}`, from: from.name, to: to.name, departureTime, arrivalTime: shiftClock(departureTime, durationMinutes), durationMinutes, distanceKm, mode, costEstimate: fare === undefined ? '票价以运营方为准' : `¥${fare}`, ...(fare === undefined ? {} : { fare }), instruction: legs.filter((leg) => leg.lineName).map((leg) => leg.lineName).join(' → ') || '按动态查询结果出行，出发前再次刷新。', liveStatus: '动态路线查询', legs };
+  return { id: `${from.id}-${to.id}`, from: from.name, to: to.name, departureTime, arrivalTime: shiftClock(departureTime, durationMinutes), durationMinutes, distanceKm, mode, costEstimate: fare === undefined ? '票价以运营方为准' : `¥${fare}`, ...(fare === undefined ? {} : { fare }), origin: { lng: Number(from.lng), lat: Number(from.lat) }, destination: { lng: Number(to.lng), lat: Number(to.lat) }, instruction: legs.filter((leg) => leg.lineName).map((leg) => leg.lineName).join(' → ') || '按动态查询结果出行，出发前再次刷新。', liveStatus: '动态路线查询', legs };
 }
 
 export function parseTransitLegs(transit, segmentId) {
@@ -183,7 +183,7 @@ async function drivingFallback(key, from, to, index) {
   const taxiCost = money(data.route?.taxi_cost);
   const instructions = normalized.steps.map((step) => step.instruction).filter(Boolean);
   const roadNames = [...new Set(normalized.steps.map((step) => step.road).filter(Boolean))];
-  return { id: `${from.id}-${to.id}`, from: from.name, to: to.name, departureTime, arrivalTime: shiftClock(departureTime, normalized.durationMinutes), durationMinutes: normalized.durationMinutes, distanceKm: normalized.distanceKm, mode: '网约车', costEstimate: taxiCost === undefined ? '费用待查询' : `打车约 ¥${taxiCost}`, ...(taxiCost === undefined ? {} : { fare: taxiCost }), instruction: instructions.slice(0, 3).join('；') || '该段未查询到合适公共交通，已降级为高德真实驾车道路方案。', liveStatus: '高德动态道路规划', legs: [{ id: `${from.id}-${to.id}-drive`, mode: 'taxi', lineName: '驾车接驳', viaStops: [], durationMinutes: normalized.durationMinutes, distanceKm: normalized.distanceKm, ...(taxiCost === undefined ? {} : { fare: taxiCost }), instructions, roadNames, polyline: normalized.polyline }] };
+  return { id: `${from.id}-${to.id}`, from: from.name, to: to.name, departureTime, arrivalTime: shiftClock(departureTime, normalized.durationMinutes), durationMinutes: normalized.durationMinutes, distanceKm: normalized.distanceKm, mode: '网约车', costEstimate: taxiCost === undefined ? '费用待查询' : `打车约 ¥${taxiCost}`, ...(taxiCost === undefined ? {} : { fare: taxiCost }), origin: { lng: Number(from.lng), lat: Number(from.lat) }, destination: { lng: Number(to.lng), lat: Number(to.lat) }, instruction: instructions.slice(0, 3).join('；') || '该段未查询到合适公共交通，已降级为高德真实驾车道路方案。', liveStatus: '高德动态道路规划', legs: [{ id: `${from.id}-${to.id}-drive`, mode: 'taxi', lineName: '驾车接驳', viaStops: [], durationMinutes: normalized.durationMinutes, distanceKm: normalized.distanceKm, ...(taxiCost === undefined ? {} : { fare: taxiCost }), instructions, roadNames, polyline: normalized.polyline }] };
 }
 
 async function amapJson(path, service) {

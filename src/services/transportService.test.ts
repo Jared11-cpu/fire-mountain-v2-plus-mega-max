@@ -67,18 +67,26 @@ describe('transportService', () => {
 
   it('对比高德公交和驾车事实并采用千问推荐', async () => {
     const transit: TransportPlanResponse = { source: 'transport-api', sourceLabel: '高德动态公交规划', generatedAt: new Date().toISOString(), isRealtime: false, freshness: 'live-query', totalMinutes: 80, totalDistanceKm: 30, totalFare: 8, summary: '公交可用', segments: [], notices: [] };
-    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const fetcherMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith('/transit')) return new Response(JSON.stringify(transit), { status: 200, headers: { 'Content-Type': 'application/json' } });
       if (url.endsWith('/route')) return new Response(JSON.stringify({ paths: [{ durationMinutes: 20, distanceKm: 12, tolls: 0, polyline: [] }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       return new Response(JSON.stringify({ recommendedOptionId: 'driving', reason: '驾车用时更短。', cautions: ['出发前刷新路况。'] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }) as unknown as typeof fetch;
-    const result = await resolveTransportComparison(requestFixture(), { transitEndpoint: 'https://example.test/transit', routeEndpoint: 'https://example.test/route', adviceEndpoint: 'https://example.test/advice', fetcher });
+    });
+    const fetcher = fetcherMock as unknown as typeof fetch;
+    const request = requestFixture();
+    request.strategy = 'least-walking';
+    const result = await resolveTransportComparison(request, { transitEndpoint: 'https://example.test/transit', routeEndpoint: 'https://example.test/route', adviceEndpoint: 'https://example.test/advice', fetcher });
     expect(result.options.map((option) => option.id)).toEqual(['transit', 'driving']);
     expect(result.recommendedOptionId).toBe('driving');
     expect(result.analysisSource).toBe('qwen-amap');
     expect(result.reason).toContain('用时更短');
+    expect(result.optionAnalyses).toHaveLength(2);
     expect(result.options.find((option) => option.id === 'driving')?.plan.segments.every((segment) => segment.legs.every((leg) => leg.polyline.length === 0))).toBe(true);
+    const transitCall = fetcherMock.mock.calls.find(([input]) => String(input).endsWith('/transit'));
+    const adviceCall = fetcherMock.mock.calls.find(([input]) => String(input).endsWith('/advice'));
+    expect(JSON.parse(String((transitCall?.[1] as RequestInit).body)).strategy).toBe('least-walking');
+    expect(JSON.parse(String((adviceCall?.[1] as RequestInit).body)).userPreference).toBe('少步行');
   });
 });
 

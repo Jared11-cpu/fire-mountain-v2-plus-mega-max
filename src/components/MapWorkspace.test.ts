@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { baseRoutes } from '../data/routeData';
 import type { TransportPlanResponse, TransportSegment } from '../services/transportService';
-import { addTransportClock, compactTravelTip, formatTransportDistance, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointDetailLinks, getPointPrimaryDetailLink, getPointServiceLinks, getRailwayStationTimetableUrl, getTransportLegPreview, getTransportLegStations, getTransportSegmentAriaLabel, getVerifiedCtripDetailUrl, getXiaohongshuGuideUrl, isDirectCtripDetailUrl, normalizeActualStayMinutes, normalizeTravelMinutes, recalculateEditableTimeline } from './MapWorkspace';
+import { addTransportClock, compactTravelTip, formatTransportDistance, getAmapRouteUrl, getBudgetUsageVisual, getDianpingShopDetailUrl, getHourlyChartScale, getPointDetailLinks, getPointPrimaryDetailLink, getPointServiceLinks, getRailwayStationTimetableUrl, getTransportLegPreview, getTransportLegStations, getTransportSegmentAriaLabel, getVerifiedCtripDetailUrl, getXiaohongshuGuideUrl, isDirectCtripDetailUrl, normalizeActualStayMinutes, normalizeTravelMinutes, recalculateEditableTimeline } from './MapWorkspace';
 import { getFocusedTransportPath, getFocusedTransportSegmentPoints } from './RouteMap';
 
 describe('getPointServiceLinks', () => {
@@ -187,6 +187,17 @@ describe('AMap-style transport segment summaries', () => {
   it('includes time, route, and fare in the accessible card label', () => {
     const segment: TransportSegment = { id: 'segment', from: '武汉站', to: '武汉东湖', departureTime: '08:55', arrivalTime: '09:22', durationMinutes: 27, distanceKm: 10, mode: '地铁', costEstimate: '¥4', instruction: '', legs: [{ id: 'line', mode: 'subway', lineName: '地铁2号线', viaStops: [], durationMinutes: 18, distanceKm: 9.6, polyline: [] }] };
     expect(getTransportSegmentAriaLabel(segment, 0, false)).toContain('08:55 出发，09:22 到达；地铁2号线；费用 ¥4');
+  });
+
+  it('creates a direct AMap route link with coordinates, names, mode and policy', () => {
+    const segment: TransportSegment = { id: 'segment', from: '武汉站', to: '光谷广场', origin: { lng: 114.4244, lat: 30.6072 }, destination: { lng: 114.397, lat: 30.505 }, departureTime: '08:55', arrivalTime: '09:37', durationMinutes: 42, distanceKm: 21.3, mode: '公交', costEstimate: '¥4', instruction: '', legs: [{ id: 'line', mode: 'bus', lineName: '521路', viaStops: [], durationMinutes: 42, distanceKm: 21.3, polyline: [] }] };
+    const url = new URL(getAmapRouteUrl(segment, 'fewest-transfers'));
+    expect(url.origin + url.pathname).toBe('https://uri.amap.com/navigation');
+    expect(url.searchParams.get('from')).toBe('114.424400,30.607200,武汉站');
+    expect(url.searchParams.get('to')).toBe('114.397000,30.505000,光谷广场');
+    expect(url.searchParams.get('mode')).toBe('bus');
+    expect(url.searchParams.get('policy')).toBe('1');
+    expect(url.searchParams.get('callnative')).toBe('1');
   });
 });
 

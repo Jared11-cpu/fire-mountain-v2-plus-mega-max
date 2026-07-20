@@ -34,7 +34,7 @@ export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, n
   const loadTransport = useCallback((signal?: AbortSignal, silent = false) => {
     if (!silent) setTransportLoading(true);
     return resolveTransportComparison(toTransportPlanRequest(request, tripPlan?.route.points as PlannedRoutePoint[] ?? [], tripPlan?.settings.departureTime ?? '08:30', transportStrategy), { signal })
-      .then((result) => { setTransportComparison(result); setTransportChoiceId(result.recommendedOptionId); setFocusedTransportSegmentId(null); })
+      .then((result) => { setTransportComparison(result); setTransportChoiceId((current) => current === 'transit' ? 'transit' : result.recommendedOptionId); setFocusedTransportSegmentId(null); })
       .finally(() => { if (!signal?.aborted) setTransportLoading(false); });
   }, [request, tripPlan?.route.points, tripPlan?.settings.departureTime, transportStrategy]);
   useEffect(() => {
@@ -101,7 +101,7 @@ export function MapWorkspace({ route, plan, selectedPointId, activePointIndex, n
           {tab === 'stops' && <Stops points={route.points as PlannedRoutePoint[]} selectedId={selectedPointId} fallbackImageUrl={imageUrl} dailyRecords={tripPlan.dailyRecords} maxDays={request.days} onSelect={onSelectPoint} onPatchPoint={patchRoutePoint} onPatchNote={(id, note) => patchPlan((value) => ({ ...value, pointNotes: { ...value.pointNotes, [id]: note } }))} notes={tripPlan.pointNotes} />}
           {tab === 'days' && <Days plan={tripPlan} entries={journalEntries} onPatch={patchPlan} onEntries={setJournalEntries} onNotify={notify} />}
           {tab === 'weather' && <Weather request={request} lat={route.points[0]?.lat} lng={route.points[0]?.lng} />}
-          {tab === 'transport' && <Transport comparison={transportComparison} selectedId={transportChoiceId} focusedSegmentId={focusedTransportSegmentId} loading={transportLoading} strategy={transportStrategy} onSelect={(id) => { setTransportChoiceId(id); setFocusedTransportSegmentId(null); }} onFocusSegment={setFocusedTransportSegmentId} onStrategy={setTransportStrategy} onReload={() => loadTransport().catch(() => undefined)} onSimulate={onSimulateNavigation} />}
+          {tab === 'transport' && <Transport comparison={transportComparison} selectedId={transportChoiceId} focusedSegmentId={focusedTransportSegmentId} loading={transportLoading} strategy={transportStrategy} onSelect={(id) => { setTransportChoiceId(id); setFocusedTransportSegmentId(null); }} onFocusSegment={setFocusedTransportSegmentId} onStrategy={(nextStrategy) => { setTransportChoiceId('transit'); setFocusedTransportSegmentId(null); setTransportStrategy(nextStrategy); }} onReload={() => loadTransport().catch(() => undefined)} onSimulate={onSimulateNavigation} />}
           {tab === 'food' && <Food plan={tripPlan} />}
           {tab === 'budget' && <Budget items={tripPlan.budgetItems} target={request.budget} days={request.days} onChange={updateBudgetItems} />}
         </div>
@@ -584,14 +584,16 @@ const transitStrategies: Array<{ id: TransitStrategy; label: string; icon: typeo
   { id: 'fewest-transfers', label: '少换乘', icon: RouteIcon }, { id: 'least-walking', label: '少步行', icon: Footprints }, { id: 'subway-first', label: '地铁优先', icon: TrainFront },
 ];
 
+function getTransitStrategyLabel(strategy: TransitStrategy) { return transitStrategies.find((item) => item.id === strategy)?.label ?? '推荐'; }
+
 function Transport({ comparison, selectedId, focusedSegmentId, loading, strategy, onSelect, onFocusSegment, onStrategy, onReload, onSimulate }: { comparison: TransportComparison | null; selectedId: TransportChoiceId; focusedSegmentId: string | null; loading: boolean; strategy: TransitStrategy; onSelect: (id: TransportChoiceId) => void; onFocusSegment: (id: string | null) => void; onStrategy: (strategy: TransitStrategy) => void; onReload: () => void; onSimulate?: () => void }) {
   const selected = comparison?.options.find((option) => option.id === selectedId) ?? comparison?.options[0];
   const transport = selected?.plan ?? null;
   return <div className="space-y-4"><div className="flex items-end justify-between gap-3"><div><h4 className="font-display text-2xl font-black">交通方案</h4><p className="mt-1 text-xs font-bold text-ink/45">高德路线 · 千问推荐</p></div><button type="button" aria-label="重新查询交通方案" disabled={loading} onClick={onReload} className="grid h-9 w-9 place-items-center rounded-full bg-white text-river shadow-sm disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></button></div>
     <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="交通方式选择">{comparison?.options.map((option) => <TransportChoiceCard key={option.id} option={option} selected={option.id === selectedId} recommended={option.id === comparison.recommendedOptionId} onSelect={onSelect} />) ?? <TransportChoiceSkeleton />}</div>
-    {comparison && <section className="rounded-[1.45rem] border border-river/10 bg-gradient-to-br from-river/[0.09] to-jade/[0.08] p-4"><div className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-1.5 text-[10px] font-black text-river"><Sparkles className="h-4 w-4" />{comparison.analysisSource === 'qwen-amap' ? '千问 AI 推荐' : '智能规则推荐'}</span><span className="rounded-full bg-white/80 px-2 py-1 text-[9px] font-black text-ink/45">推荐 {comparison.options.find((option) => option.id === comparison.recommendedOptionId)?.label}</span></div><p className="mt-2 text-[11px] font-bold leading-5 text-ink/65">{comparison.reason}</p></section>}
-    {selectedId === 'transit' && <section className="rounded-[1.55rem] border border-river/10 bg-gradient-to-br from-white via-white to-river/[0.06] p-3.5 shadow-[0_12px_30px_rgba(18,34,42,.07)]"><div className="mb-3 flex items-center justify-between gap-3"><div><strong className="font-display text-base font-black">公共交通偏好</strong><p className="mt-0.5 text-[10px] font-bold text-ink/40">选择后自动重新规划</p></div><span className="rounded-full bg-jade/10 px-2.5 py-1 text-[10px] font-black text-jade">当前 · {transitStrategies.find((item) => item.id === strategy)?.label}</span></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="公共交通路线偏好">{transitStrategies.map((item) => { const Icon = item.icon; const active = strategy === item.id; return <button key={item.id} type="button" role="radio" aria-checked={active} onClick={() => onStrategy(item.id)} className={`group relative flex min-h-12 items-center gap-2 overflow-hidden rounded-[1rem] border px-3 py-2.5 text-left text-[13px] font-black transition duration-200 ${active ? 'border-ink bg-ink text-white shadow-[0_9px_20px_rgba(18,34,42,.18)]' : 'border-ink/8 bg-white text-ink/65 shadow-sm hover:-translate-y-0.5 hover:border-river/25 hover:text-river hover:shadow-md'}`}><span className={`grid h-7 w-7 shrink-0 place-items-center rounded-xl transition ${active ? 'bg-jade text-ink' : 'bg-river/8 text-river group-hover:bg-river/12'}`}><Icon className="h-4 w-4" /></span><span className="whitespace-nowrap">{item.label}</span>{active && <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-jade" />}</button>; })}</div></section>}
-    {transport?.segments.map((segment, index) => <TransportSegmentCard key={segment.id} segment={segment} index={index} expanded={focusedSegmentId === segment.id} hasRealGeometry={getFocusedTransportPath(transport, segment.id).length > 1} onToggle={() => onFocusSegment(focusedSegmentId === segment.id ? null : segment.id)} />)}
+    {comparison && <section className="rounded-[1.45rem] border border-river/10 bg-gradient-to-br from-river/[0.09] to-jade/[0.08] p-4"><div className="flex items-center justify-between gap-3"><span className="inline-flex items-center gap-1.5 text-[10px] font-black text-river"><Sparkles className="h-4 w-4" />{comparison.analysisSource === 'qwen-amap' ? `${getTransitStrategyLabel(strategy)} · 千问 AI 分析` : `${getTransitStrategyLabel(strategy)} · 智能规则分析`}</span><span className="rounded-full bg-white/80 px-2 py-1 text-[9px] font-black text-ink/45">推荐 {comparison.options.find((option) => option.id === comparison.recommendedOptionId)?.label}</span></div><p className="mt-2 text-[11px] font-bold leading-5 text-ink/65">{comparison.reason}</p>{comparison.optionAnalyses.length > 0 && <div className="mt-3 grid gap-2">{comparison.optionAnalyses.map((analysis) => <div key={analysis.id} className="flex gap-2 rounded-xl bg-white/65 px-3 py-2"><strong className="w-16 shrink-0 text-[9px] font-black text-river">{comparison.options.find((option) => option.id === analysis.id)?.label}</strong><span className="text-[9px] font-bold leading-4 text-ink/50">{analysis.summary}</span></div>)}</div>}</section>}
+    {selectedId === 'transit' && <section className="rounded-[1.55rem] border border-river/10 bg-gradient-to-br from-white via-white to-river/[0.06] p-3.5 shadow-[0_12px_30px_rgba(18,34,42,.07)]"><div className="mb-3 flex items-center justify-between gap-3"><div><strong className="font-display text-base font-black">公共交通偏好</strong><p className="mt-0.5 text-[10px] font-bold text-ink/40">选择后同步更新路线与 AI 分析</p></div><span aria-live="polite" className="rounded-full bg-jade/10 px-2.5 py-1 text-[10px] font-black text-jade">{loading ? '正在重新规划…' : `当前 · ${getTransitStrategyLabel(strategy)}`}</span></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="公共交通路线偏好">{transitStrategies.map((item) => { const Icon = item.icon; const active = strategy === item.id; return <button key={item.id} type="button" role="radio" aria-checked={active} onClick={() => onStrategy(item.id)} className={`group relative flex min-h-12 items-center gap-2 overflow-hidden rounded-[1rem] border px-3 py-2.5 text-left text-[13px] font-black transition duration-200 ${active ? 'border-ink bg-ink text-white shadow-[0_9px_20px_rgba(18,34,42,.18)]' : 'border-ink/8 bg-white text-ink/65 shadow-sm hover:-translate-y-0.5 hover:border-river/25 hover:text-river hover:shadow-md'}`}><span className={`grid h-7 w-7 shrink-0 place-items-center rounded-xl transition ${active ? 'bg-jade text-ink' : 'bg-river/8 text-river group-hover:bg-river/12'}`}><Icon className="h-4 w-4" /></span><span className="whitespace-nowrap">{item.label}</span>{active && <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-jade" />}</button>; })}</div></section>}
+    {transport?.segments.map((segment, index) => <TransportSegmentCard key={segment.id} segment={segment} index={index} strategy={strategy} expanded={focusedSegmentId === segment.id} hasRealGeometry={getFocusedTransportPath(transport, segment.id).length > 1} onToggle={() => onFocusSegment(focusedSegmentId === segment.id ? null : segment.id)} />)}
     {transport?.notices.slice(0, 2).map((notice, index) => <div key={notice} className={`flex gap-2 rounded-2xl p-3 text-[11px] font-bold leading-5 ${index === 0 ? 'bg-tower/10 text-ink/65' : 'bg-ink/[0.035] text-ink/50'}`}><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-tower" />{notice}</div>)}
     <div className="grid grid-cols-2 gap-2"><a href="https://www.12306.cn/" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 rounded-2xl bg-white px-3 py-3 text-xs font-black shadow-sm"><TrainFront className="h-4 w-4 text-river" />铁路12306<ExternalLink className="h-3 w-3" /></a><a href="https://www.amap.com/" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 rounded-2xl bg-white px-3 py-3 text-xs font-black shadow-sm"><Bus className="h-4 w-4 text-river" />高德复核<ExternalLink className="h-3 w-3" /></a></div><button type="button" onClick={onSimulate} className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-river px-4 py-3 font-black text-white"><RouteIcon className="h-4 w-4" />在地图上高亮交通路线</button></div>;
 }
@@ -604,7 +606,7 @@ function TransportChoiceCard({ option, selected, recommended, onSelect }: { opti
 
 function TransportChoiceSkeleton() { return <>{['公交 / 地铁', '驾车'].map((label) => <div key={label} className="animate-pulse rounded-[1.4rem] bg-white p-3 shadow-sm"><div className="h-9 w-9 rounded-2xl bg-ink/8" /><strong className="mt-3 block text-sm text-ink/35">{label}</strong><div className="mt-3 h-6 w-16 rounded bg-ink/8" /></div>)}</>; }
 
-function TransportSegmentCard({ segment, index, expanded, hasRealGeometry, onToggle }: { segment: TransportSegment; index: number; expanded: boolean; hasRealGeometry: boolean; onToggle: () => void }) {
+function TransportSegmentCard({ segment, index, strategy, expanded, hasRealGeometry, onToggle }: { segment: TransportSegment; index: number; strategy: TransitStrategy; expanded: boolean; hasRealGeometry: boolean; onToggle: () => void }) {
   const walkingLegs = segment.legs.filter((leg) => leg.mode === 'walk');
   const routeLegs = segment.legs.filter((leg) => leg.mode !== 'walk');
   const previewLegs = routeLegs.slice(0, 3);
@@ -618,6 +620,7 @@ function TransportSegmentCard({ segment, index, expanded, hasRealGeometry, onTog
     roadNames: [...new Set(walkingLegs.flatMap((leg) => leg.roadNames ?? []))],
     polyline: [],
   } : null;
+  const amapRouteUrl = getAmapRouteUrl(segment, strategy);
   return <article className={`relative overflow-hidden rounded-[1.6rem] border bg-white transition ${expanded ? 'border-tower shadow-[0_16px_38px_rgba(201,79,61,.16)] ring-4 ring-tower/10' : 'border-ink/8 shadow-sm hover:border-river/20 hover:shadow-md'}`}>
     <button type="button" aria-expanded={expanded} aria-label={getTransportSegmentAriaLabel(segment, index, expanded)} onClick={onToggle} className="block w-full p-4 text-left">
       <span className="flex items-start gap-3">
@@ -645,8 +648,27 @@ function TransportSegmentCard({ segment, index, expanded, hasRealGeometry, onTog
       </span>
       <span className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-river/8 px-2.5 py-1 text-[10px] font-black text-river">全程 {formatTransportDistance(segment.distanceKm)}</span><span className="rounded-full bg-jade/10 px-2.5 py-1 text-[10px] font-black text-jade">费用 {segment.costEstimate}</span></span>
     </button>
+    {amapRouteUrl && <div className="border-t border-ink/8 bg-white px-4 py-3"><a href={amapRouteUrl} target="_blank" rel="noreferrer" className="flex w-full items-center justify-between gap-3 rounded-xl bg-river/[0.07] px-3 py-2.5 text-[11px] font-black text-river transition hover:bg-river hover:text-white"><span className="inline-flex items-center gap-2"><Navigation className="h-4 w-4" />高德查看完整路线</span><span className="inline-flex items-center gap-1 text-[9px]">已填入起点与终点<ExternalLink className="h-3 w-3" /></span></a></div>}
     {expanded && <TransportExpandedDetails segment={segment} hasRealGeometry={hasRealGeometry} />}
   </article>;
+}
+
+export function getAmapRouteUrl(segment: TransportSegment, strategy: TransitStrategy = 'recommended') {
+  if (!segment.origin || !segment.destination || !Number.isFinite(segment.origin.lng) || !Number.isFinite(segment.origin.lat) || !Number.isFinite(segment.destination.lng) || !Number.isFinite(segment.destination.lat)) return '';
+  const onlyWalking = segment.legs.length > 0 && segment.legs.every((leg) => leg.mode === 'walk');
+  const driving = segment.mode === '驾车' || segment.mode === '网约车' || segment.legs.some((leg) => leg.mode === 'taxi');
+  const mode = onlyWalking ? 'walk' : driving ? 'car' : 'bus';
+  const busPolicy = strategy === 'fewest-transfers' ? '1' : strategy === 'least-walking' ? '2' : '0';
+  const carPolicy = strategy === 'economy' ? '2' : strategy === 'fastest' ? '1' : '0';
+  const params = new URLSearchParams({
+    from: `${segment.origin.lng.toFixed(6)},${segment.origin.lat.toFixed(6)},${segment.from}`,
+    to: `${segment.destination.lng.toFixed(6)},${segment.destination.lat.toFixed(6)},${segment.to}`,
+    mode,
+    policy: mode === 'bus' ? busPolicy : mode === 'car' ? carPolicy : '0',
+    src: 'chuyou-ai',
+    callnative: '1',
+  });
+  return `https://uri.amap.com/navigation?${params.toString()}`;
 }
 
 function TransportExpandedDetails({ segment, hasRealGeometry }: { segment: TransportSegment; hasRealGeometry: boolean }) {

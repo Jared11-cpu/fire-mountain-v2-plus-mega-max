@@ -40,11 +40,13 @@ export async function transportAdvice(input, env) {
   const options = input.options.map((option, index) => ({ id: String(option.id ?? index), ...copyFacts(option) }));
   const result = await qwenJson(env, {
     model: env.AI_RECOMMEND_MODEL || 'qwen-plus', temperature: 0.15,
-    system: '你是交通方案解释器。必须只返回 JSON，只能从 options 中选择 id，不得计算或修改线路、时间、票价、站点、路况和车辆位置。返回 {"recommendedOptionId":"id","reason":"简洁理由","cautions":["注意事项"]}。',
+    system: '你是交通方案解释器。必须只返回 JSON，只能从 options 中选择 id，不得计算或修改线路、时间、票价、站点、路况和车辆位置。需要结合 userPreference 分别解释每一种交通方式的优势和取舍。返回 {"recommendedOptionId":"id","reason":"结合当前偏好的推荐理由","cautions":["注意事项"],"optionAnalyses":[{"id":"方案id","summary":"该方案在当前偏好下的事实性分析"}]}。',
     user: JSON.stringify({ options, userPreference: input.userPreference || '', specialNeeds: input.specialNeeds || [] }),
   });
   if (!options.some((item) => item.id === String(result.recommendedOptionId))) throw httpError(502, 'AI 返回了不存在的交通方案');
-  return { recommendedOptionId: String(result.recommendedOptionId), reason: assertText(result.reason, '推荐理由', { max: 800 }), cautions: stringArray(result.cautions, 10) };
+  const optionIds = new Set(options.map((item) => item.id));
+  const optionAnalyses = (Array.isArray(result.optionAnalyses) ? result.optionAnalyses : []).filter((item) => item && optionIds.has(String(item.id)) && String(item.summary || '').trim()).slice(0, options.length).map((item) => ({ id: String(item.id), summary: assertText(item.summary, '方案分析', { max: 500 }) }));
+  return { recommendedOptionId: String(result.recommendedOptionId), reason: assertText(result.reason, '推荐理由', { max: 800 }), cautions: stringArray(result.cautions, 10), optionAnalyses };
 }
 
 export async function customAnalysis(input, env) {
