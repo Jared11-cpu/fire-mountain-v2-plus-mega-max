@@ -8,7 +8,7 @@ const amapMocks = vi.hoisted(() => {
   const mapInstance = {
     add: vi.fn(), remove: vi.fn(), clearMap: vi.fn(), destroy: vi.fn(), resize: vi.fn(),
     setFitView: vi.fn(), setFeatures: vi.fn(), setMapStyle: vi.fn(), setZoomAndCenter: vi.fn(),
-    zoomIn: vi.fn(), zoomOut: vi.fn(), getZoom: vi.fn(() => 12), on: vi.fn(),
+    zoomIn: vi.fn(), zoomOut: vi.fn(), getZoom: vi.fn(() => 12), getCenter: vi.fn(() => ({ lng: 114.4, lat: 30.6 })), on: vi.fn(),
   };
   const Map = vi.fn(function Map(_container: unknown, _options: Record<string, unknown>) { return mapInstance; });
   const planBackendDrivingRoute = vi.fn();
